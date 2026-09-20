@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Compras - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Compras a proveedores</h1>
+          <p>Ordenes de compra: crea, recepciona y el stock se actualiza solo</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nueva">+ Nueva orden</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Fecha</th><th>Proveedor</th><th class="num">Total</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="tbl"><tr><td colspan="6" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal-nueva" hidden>
+    <div class="modal modal-wide">
+      <h2>Nueva orden de compra</h2>
+      <div class="field">
+        <label>Proveedor</label>
+        <select id="c-proveedor"><option value="">Sin proveedor especifico</option></select>
+      </div>
+      <div class="field">
+        <label>Agregar producto</label>
+        <input type="search" id="c-buscar" placeholder="Buscar por nombre o SKU...">
+        <div class="pos-search-results" id="c-resultados"></div>
+      </div>
+      <div id="c-items">
+        <p class="empty-state" id="c-items-vacio">Aun no has agregado productos</p>
+      </div>
+      <div class="field"><label>Notas</label><input id="c-notas"></div>
+      <div class="cart-totals">
+        <div class="row total"><span>Total</span><span id="c-total">$0</span></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-guardar-orden">Crear orden</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-detalle" hidden>
+    <div class="modal modal-wide">
+      <h2>Detalle de orden #<span id="d-id"></span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo</th><th class="num">Subtotal</th></tr></thead>
+          <tbody id="d-items"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cerrar</button>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    let itemsOrden = [];
+
+    async function cargarProveedores() {
+      const proveedores = await api('/proveedores');
+      document.getElementById('c-proveedor').insertAdjacentHTML('beforeend',
+        proveedores.map((p) => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join(''));
+    }
+
+    const ESTADO_BADGE = {
+      pendiente: '<span class="badge badge-warn">pendiente</span>',
+      recepcionada: '<span class="badge badge-ok">recepcionada</span>',
+      cancelada: '<span class="badge badge-muted">cancelada</span>',
+    };
+
+    async function cargarTabla() {
+      const rows = await api('/compras');
+      const tbody = document.getElementById('tbl');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aun no hay ordenes de compra</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((c) => `
+        <tr>
+          <td>${c.id}</td>
+          <td>${formatoFecha(c.fecha)}</td>
+          <td>${escapeHtml(c.proveedor_nombre || '-')}</td>
+          <td class="num">${formatoMoneda(c.total)}</td>
+          <td>${ESTADO_BADGE[c.estado] || c.estado}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-ver="${c.id}">Ver</button>
+            ${c.estado === 'pendiente' ? `<button class="btn btn-sm btn-primary" data-recepcionar="${c.id}">Recepcionar</button>
+            <button class="btn btn-sm btn-danger" data-cancelar="${c.id}">Cancelar</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('btn-nueva').addEventListener('click', () => {
+      itemsOrden = [];
+      document.getElementById('c-proveedor').value = '';
+      document.getElementById('c-notas').value = '';
+      document.getElementById('c-buscar').value = '';
+      document.getElementById('c-resultados').innerHTML = '';
+      renderItemsOrden();
+      document.getElementById('modal-nueva').hidden = false;
+    });
+
+    async function buscarProductosOrden() {
+      const q = document.getElementById('c-buscar').value.trim();
+      const cont = document.getElementById('c-resultados');
+      if (!q) { cont.innerHTML = ''; return; }
+      const productos = await api(`/productos?q=${encodeURIComponent(q)}`);
+      if (productos.length === 0) { cont.innerHTML = '<p class="empty-state">Sin resultados</p>'; return; }
+      cont.innerHTML = productos.map((p) => `
+        <div class="pos-search-item" data-agregar="${p.id}">
+          <div>
+            <div class="name">${escapeHtml(p.nombre)}</div>
+            <div class="meta">${p.sku ? escapeHtml(p.sku) : ''}</div>
+          </div>
+          <div>Costo: ${formatoMoneda(p.precio_costo)}</div>
+        </div>
+      `).join('');
+      cont.querySelectorAll('[data-agregar]').forEach((item) => {
+        item.addEventListener('click', () => {
+          const producto = productos.find((p) => String(p.id) === item.dataset.agregar);
+          const existente = itemsOrden.find((l) => l.producto_id === producto.id);
+          if (existente) {
+            existente.cantidad += 1;
+          } else {
+            itemsOrden.push({ producto_id: producto.id, nombre: producto.nombre, precio_costo: producto.precio_costo, cantidad: 1 });
+          }
+          renderItemsOrden();
+          document.getElementById('c-buscar').value = '';
+          cont.innerHTML = '';
+        });
+      });
+    }
+
+    function renderItemsOrden() {
+      const cont = document.getElementById('c-items');
+      if (itemsOrden.length === 0) {
+        cont.innerHTML = '<p class="empty-state">Aun no has agregado productos</p>';
+      } else {
+        cont.innerHTML = itemsOrden.map((l, i) => `
+          <div class="cart-line">
+            <div class="name">${escapeHtml(l.nombre)}</div>
+            <label style="margin:0">Cant.</label>
+            <input type="number" min="1" step="1" value="${l.cantidad}" data-cant="${i}" style="width:70px">
+            <label style="margin:0">Costo</label>
+            <input type="number" min="0" step="1" value="${l.precio_costo}" data-costo="${i}" style="width:90px">
+            <button class="btn btn-sm btn-danger" data-quitar="${i}">&times;</button>
+          </div>
+        `).join('');
+      }
+      const total = itemsOrden.reduce((sum, l) => sum + l.precio_costo * l.cantidad, 0);
+      document.getElementById('c-total').textContent = formatoMoneda(total);
+    }
+
+    document.getElementById('c-items').addEventListener('input', (e) => {
+      const cantIdx = e.target.dataset.cant;
+      const costoIdx = e.target.dataset.costo;
+      if (cantIdx != null) itemsOrden[cantIdx].cantidad = Math.max(1, Number(e.target.value) || 1);
+      if (costoIdx != null) itemsOrden[costoIdx].precio_costo = Math.max(0, Number(e.target.value) || 0);
+      const total = itemsOrden.reduce((sum, l) => sum + l.precio_costo * l.cantidad, 0);
+      document.getElementById('c-total').textContent = formatoMoneda(total);
+    });
+
+    document.getElementById('c-items').addEventListener('click', (e) => {
+      const idx = e.target.dataset.quitar;
+      if (idx == null) return;
+      itemsOrden.splice(idx, 1);
+      renderItemsOrden();
+    });
+
+    document.getElementById('c-buscar').addEventListener('input', debounce(buscarProductosOrden, 250));
+
+    document.getElementById('btn-guardar-orden').addEventListener('click', async () => {
+      if (itemsOrden.length === 0) { toast('Agrega al menos un producto', 'error'); return; }
+      try {
+        await api('/compras', {
+          method: 'POST',
+          body: {
+            proveedor_id: document.getElementById('c-proveedor').value || null,
+            notas: document.getElementById('c-notas').value.trim(),
+            items: itemsOrden.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, precio_costo: l.precio_costo })),
+          },
+        });
+        toast('Orden de compra creada', 'success');
+        document.getElementById('modal-nueva').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('tbl').addEventListener('click', async (e) => {
+      const verId = e.target.dataset.ver;
+      const recepcionarId = e.target.dataset.recepcionar;
+      const cancelarId = e.target.dataset.cancelar;
+
+      if (verId) {
+        const compra = await api(`/compras/${verId}`);
+        document.getElementById('d-id').textContent = compra.id;
+        document.getElementById('d-items').innerHTML = compra.detalle.map((d) => `
+          <tr>
+            <td>${escapeHtml(d.producto_nombre)}</td>
+            <td class="num">${formatoNumero(d.cantidad)}</td>
+            <td class="num">${formatoMoneda(d.precio_costo)}</td>
+            <td class="num">${formatoMoneda(d.subtotal)}</td>
+          </tr>
+        `).join('');
+        document.getElementById('modal-detalle').hidden = false;
+      } else if (recepcionarId) {
+        if (!confirm('¿Recepcionar esta orden? Se sumara el stock de cada producto.')) return;
+        try {
+          await api(`/compras/${recepcionarId}/recepcionar`, { method: 'POST' });
+          toast('Orden recepcionada, stock actualizado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      } else if (cancelarId) {
+        if (!confirm('¿Cancelar esta orden?')) return;
+        try {
+          await api(`/compras/${cancelarId}/cancelar`, { method: 'POST' });
+          toast('Orden cancelada', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    cargarProveedores();
+    cargarTabla();
+  })();
+  </script>
+</body>
+</html>

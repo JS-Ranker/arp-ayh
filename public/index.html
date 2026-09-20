@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Panel - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Panel general</h1>
+          <p>Resumen del negocio al dia de hoy</p>
+        </div>
+      </div>
+
+      <div class="grid grid-4" id="stat-tiles">
+        <div class="card stat-tile"><div class="label">Ventas hoy</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Ventas del mes</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Utilidad del mes</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Valor de inventario</div><div class="value">&mdash;</div></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:16px">
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Productos con stock bajo</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Minimo</th></tr></thead>
+              <tbody id="tbl-bajo-stock"><tr><td colspan="3" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Productos mas vendidos este mes</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Total</th></tr></thead>
+              <tbody id="tbl-top-productos"><tr><td colspan="3" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    async function cargar() {
+      try {
+        const d = await api('/reportes/dashboard');
+
+        const tiles = document.querySelectorAll('#stat-tiles .stat-tile');
+        tiles[0].querySelector('.value').textContent = formatoMoneda(d.ventasHoy.total);
+        tiles[0].insertAdjacentHTML('beforeend', `<div class="sub">${d.ventasHoy.cantidad} venta(s)</div>`);
+
+        tiles[1].querySelector('.value').textContent = formatoMoneda(d.ventasMes.total);
+        tiles[1].insertAdjacentHTML('beforeend', `<div class="sub">${d.ventasMes.cantidad} venta(s)</div>`);
+
+        tiles[2].querySelector('.value').textContent = formatoMoneda(d.utilidadMes.utilidad);
+        tiles[2].insertAdjacentHTML('beforeend', `<div class="sub">Margen sobre ventas del mes</div>`);
+
+        tiles[3].querySelector('.value').textContent = formatoMoneda(d.valorInventario.costo);
+        tiles[3].insertAdjacentHTML('beforeend', `<div class="sub">Valor a precio de venta: ${formatoMoneda(d.valorInventario.venta)}</div>`);
+
+        if (d.bajoStock.cantidad > 0) {
+          tiles[3].closest('.grid').insertAdjacentHTML('beforebegin', '');
+        }
+
+        const tblBajo = document.getElementById('tbl-bajo-stock');
+        if (d.productosBajoStock.length === 0) {
+          tblBajo.innerHTML = '<tr><td colspan="3" class="empty-state">Todo el stock esta sobre el minimo &#127881;</td></tr>';
+        } else {
+          tblBajo.innerHTML = d.productosBajoStock.map((p) => `
+            <tr>
+              <td>${escapeHtml(p.nombre)} ${p.sku ? `<span class="text-muted">(${escapeHtml(p.sku)})</span>` : ''}</td>
+              <td class="num">${formatoNumero(p.stock_actual)}</td>
+              <td class="num">${formatoNumero(p.stock_minimo)}</td>
+            </tr>
+          `).join('');
+        }
+
+        const tblTop = document.getElementById('tbl-top-productos');
+        if (d.topProductosMes.length === 0) {
+          tblTop.innerHTML = '<tr><td colspan="3" class="empty-state">Aun no hay ventas este mes</td></tr>';
+        } else {
+          tblTop.innerHTML = d.topProductosMes.map((p) => `
+            <tr>
+              <td>${escapeHtml(p.producto_nombre)}</td>
+              <td class="num">${formatoNumero(p.cantidad)}</td>
+              <td class="num">${formatoMoneda(p.total)}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+    cargar();
+  })();
+  </script>
+</body>
+</html>

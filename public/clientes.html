@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Clientes - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Clientes</h1>
+          <p>Base de clientes para tus ventas</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nuevo">+ Nuevo cliente</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="buscar" placeholder="Buscar por nombre o RUT..." style="width:260px">
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nombre</th><th>RUT</th><th>Telefono</th><th>Email</th><th></th></tr></thead>
+            <tbody id="tbl"><tr><td colspan="5" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2 id="modal-titulo">Nuevo cliente</h2>
+      <form id="form">
+        <input type="hidden" id="f-id">
+        <div class="field"><label>Nombre *</label><input id="f-nombre" required></div>
+        <div class="field-row">
+          <div class="field"><label>RUT</label><input id="f-rut"></div>
+          <div class="field"><label>Telefono</label><input id="f-telefono"></div>
+        </div>
+        <div class="field"><label>Email</label><input id="f-email" type="email"></div>
+        <div class="field"><label>Direccion</label><input id="f-direccion"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    async function cargarTabla() {
+      const q = document.getElementById('buscar').value.trim();
+      const rows = await api(`/clientes${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      const tbody = document.getElementById('tbl');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Aun no hay clientes</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((c) => `
+        <tr>
+          <td>${escapeHtml(c.nombre)}</td>
+          <td>${escapeHtml(c.rut || '')}</td>
+          <td>${escapeHtml(c.telefono || '')}</td>
+          <td>${escapeHtml(c.email || '')}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-editar="${c.id}">Editar</button>
+            <button class="btn btn-sm btn-danger" data-eliminar="${c.id}">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function abrirModal(c) {
+      document.getElementById('modal-titulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
+      document.getElementById('f-id').value = c?.id || '';
+      document.getElementById('f-nombre').value = c?.nombre || '';
+      document.getElementById('f-rut').value = c?.rut || '';
+      document.getElementById('f-telefono').value = c?.telefono || '';
+      document.getElementById('f-email').value = c?.email || '';
+      document.getElementById('f-direccion').value = c?.direccion || '';
+      document.getElementById('modal').hidden = false;
+    }
+
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModal(null));
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const payload = {
+        nombre: document.getElementById('f-nombre').value.trim(),
+        rut: document.getElementById('f-rut').value.trim(),
+        telefono: document.getElementById('f-telefono').value.trim(),
+        email: document.getElementById('f-email').value.trim(),
+        direccion: document.getElementById('f-direccion').value.trim(),
+      };
+      try {
+        if (id) {
+          await api(`/clientes/${id}`, { method: 'PUT', body: payload });
+        } else {
+          await api('/clientes', { method: 'POST', body: payload });
+        }
+        toast('Cliente guardado', 'success');
+        document.getElementById('modal').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('tbl').addEventListener('click', async (e) => {
+      const editarId = e.target.dataset.editar;
+      const eliminarId = e.target.dataset.eliminar;
+      if (editarId) {
+        const c = await api(`/clientes/${editarId}`);
+        abrirModal(c);
+      } else if (eliminarId) {
+        if (!confirm('¿Eliminar este cliente?')) return;
+        try {
+          await api(`/clientes/${eliminarId}`, { method: 'DELETE' });
+          toast('Cliente eliminado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    document.getElementById('buscar').addEventListener('input', debounce(cargarTabla, 300));
+    cargarTabla();
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ventas - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav" class="no-print"></div>
+    <main class="main no-print">
+      <div class="page-header">
+        <div>
+          <h1>Punto de venta</h1>
+          <p>Registra una venta y descuenta el stock automaticamente</p>
+        </div>
+      </div>
+
+      <div class="pos-layout">
+        <div class="card">
+          <label>Buscar producto por nombre o SKU</label>
+          <input type="search" id="buscar" placeholder="Escribe para buscar..." autofocus>
+          <div class="pos-search-results" id="resultados"></div>
+        </div>
+
+        <div class="card">
+          <label>Cliente (opcional)</label>
+          <select id="cliente"><option value="">Cliente de mostrador</option></select>
+
+          <div id="carrito" style="margin-top:12px">
+            <p class="empty-state" id="carrito-vacio">Aun no has agregado productos</p>
+          </div>
+
+          <div class="cart-totals">
+            <div class="row"><span>Subtotal</span><span id="t-subtotal">$0</span></div>
+            <div class="row">
+              <span>Descuento</span>
+              <input type="number" id="descuento" min="0" step="1" value="0" style="width:110px;text-align:right">
+            </div>
+            <div class="row total"><span>Total</span><span id="t-total">$0</span></div>
+          </div>
+
+          <div class="field" style="margin-top:12px">
+            <label>Metodo de pago</label>
+            <select id="metodo-pago">
+              <option value="efectivo">Efectivo</option>
+              <option value="debito">Debito</option>
+              <option value="credito">Credito</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" id="btn-cobrar" style="width:100%;justify-content:center;margin-top:8px">Cobrar</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2 style="margin-top:0;font-size:15px">Ventas recientes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Metodo</th><th class="num">Total</th><th>Estado</th><th>Envio</th><th></th></tr></thead>
+            <tbody id="tbl-ventas"><tr><td colspan="8" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal-recibo" hidden>
+    <div class="modal">
+      <div class="receipt" id="recibo-contenido"></div>
+      <div class="modal-actions no-print">
+        <button type="button" class="btn" data-close>Cerrar</button>
+        <button type="button" class="btn btn-primary" id="btn-imprimir">Imprimir</button>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    let carrito = [];
+
+    async function cargarClientes() {
+      const clientes = await api('/clientes');
+      document.getElementById('cliente').insertAdjacentHTML('beforeend',
+        clientes.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join(''));
+    }
+
+    async function buscarProductos() {
+      const q = document.getElementById('buscar').value.trim();
+      const contenedor = document.getElementById('resultados');
+      if (!q) { contenedor.innerHTML = ''; return; }
+      const productos = await api(`/productos?q=${encodeURIComponent(q)}`);
+      if (productos.length === 0) {
+        contenedor.innerHTML = '<p class="empty-state">Sin resultados</p>';
+        return;
+      }
+      contenedor.innerHTML = productos.map((p) => `
+        <div class="pos-search-item" data-agregar="${p.id}">
+          <div>
+            <div class="name">${escapeHtml(p.nombre)}</div>
+            <div class="meta">${p.sku ? escapeHtml(p.sku) + ' &middot; ' : ''}Stock: ${formatoNumero(p.stock_actual)}</div>
+          </div>
+          <div>${formatoMoneda(p.precio_venta)}</div>
+        </div>
+      `).join('');
+      contenedor.querySelectorAll('[data-agregar]').forEach((item) => {
+        item.addEventListener('click', () => {
+          const producto = productos.find((p) => String(p.id) === item.dataset.agregar);
+          agregarAlCarrito(producto);
+          document.getElementById('buscar').value = '';
+          contenedor.innerHTML = '';
+          document.getElementById('buscar').focus();
+        });
+      });
+    }
+
+    function agregarAlCarrito(producto) {
+      const existente = carrito.find((l) => l.producto_id === producto.id);
+      if (existente) {
+        existente.cantidad += 1;
+      } else {
+        carrito.push({
+          producto_id: producto.id,
+          nombre: producto.nombre,
+          sku: producto.sku,
+          precio_unitario: producto.precio_venta,
+          stock_disponible: producto.stock_actual,
+          cantidad: 1,
+        });
+      }
+      renderCarrito();
+    }
+
+    function renderCarrito() {
+      const cont = document.getElementById('carrito');
+      if (carrito.length === 0) {
+        cont.innerHTML = '<p class="empty-state" id="carrito-vacio">Aun no has agregado productos</p>';
+      } else {
+        cont.innerHTML = carrito.map((l, i) => `
+          <div class="cart-line">
+            <div class="name">${escapeHtml(l.nombre)}<span class="sku">${formatoMoneda(l.precio_unitario)} c/u</span></div>
+            <input type="number" min="1" step="1" value="${l.cantidad}" data-cant="${i}">
+            <div style="width:80px;text-align:right">${formatoMoneda(l.precio_unitario * l.cantidad)}</div>
+            <button class="btn btn-sm btn-danger" data-quitar="${i}">&times;</button>
+          </div>
+        `).join('');
+      }
+      actualizarTotales();
+    }
+
+    function actualizarTotales() {
+      const subtotal = carrito.reduce((sum, l) => sum + l.precio_unitario * l.cantidad, 0);
+      const descuento = Number(document.getElementById('descuento').value) || 0;
+      const total = Math.max(subtotal - descuento, 0);
+      document.getElementById('t-subtotal').textContent = formatoMoneda(subtotal);
+      document.getElementById('t-total').textContent = formatoMoneda(total);
+    }
+
+    document.getElementById('carrito').addEventListener('input', (e) => {
+      const idx = e.target.dataset.cant;
+      if (idx == null) return;
+      const val = Math.max(1, Number(e.target.value) || 1);
+      carrito[idx].cantidad = val;
+      actualizarTotales();
+      document.querySelector(`[data-cant="${idx}"]`).closest('.cart-line').querySelector('div[style]').textContent =
+        formatoMoneda(carrito[idx].precio_unitario * val);
+    });
+
+    document.getElementById('carrito').addEventListener('click', (e) => {
+      const idx = e.target.dataset.quitar;
+      if (idx == null) return;
+      carrito.splice(idx, 1);
+      renderCarrito();
+    });
+
+    document.getElementById('descuento').addEventListener('input', actualizarTotales);
+    document.getElementById('buscar').addEventListener('input', debounce(buscarProductos, 250));
+
+    document.getElementById('btn-cobrar').addEventListener('click', async () => {
+      if (carrito.length === 0) { toast('Agrega al menos un producto', 'error'); return; }
+      const payload = {
+        items: carrito.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, precio_unitario: l.precio_unitario })),
+        cliente_id: document.getElementById('cliente').value || null,
+        metodo_pago: document.getElementById('metodo-pago').value,
+        descuento: Number(document.getElementById('descuento').value) || 0,
+      };
+      try {
+        const venta = await api('/ventas', { method: 'POST', body: payload });
+        toast('Venta registrada', 'success');
+        carrito = [];
+        document.getElementById('descuento').value = 0;
+        renderCarrito();
+        mostrarRecibo(venta);
+        cargarVentas();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    function mostrarRecibo(venta) {
+      const fecha = formatoFecha(venta.fecha);
+      const lineas = venta.detalle.map((d) => `
+        ${escapeHtml(d.producto_nombre)}
+        ${formatoNumero(d.cantidad)} x ${formatoMoneda(d.precio_unitario)} = ${formatoMoneda(d.subtotal)}
+      `.trim()).join('\n');
+      document.getElementById('recibo-contenido').innerHTML = `
+        <div style="text-align:center">
+          <strong>ERP AYH</strong><br>Boleta de venta #${venta.id}<br>${fecha}
+        </div>
+        <hr>
+        <pre style="white-space:pre-wrap;font-family:inherit;margin:0">${lineas}</pre>
+        <hr>
+        <div>Subtotal: ${formatoMoneda(venta.subtotal)}</div>
+        <div>Descuento: ${formatoMoneda(venta.descuento)}</div>
+        <div><strong>Total: ${formatoMoneda(venta.total)}</strong></div>
+        <div style="margin-top:8px;text-align:center">¡Gracias por su compra!</div>
+      `;
+      document.getElementById('modal-recibo').hidden = false;
+    }
+
+    document.getElementById('btn-imprimir').addEventListener('click', () => window.print());
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    const ESTADO_BADGE = {
+      completada: '<span class="badge badge-ok">completada</span>',
+      anulada: '<span class="badge badge-muted">anulada</span>',
+    };
+
+    const ENVIO_BADGE = {
+      pendiente: '<span class="badge badge-warn">pendiente</span>',
+      en_camino: '<span class="badge badge-info">en camino</span>',
+      entregado: '<span class="badge badge-ok">entregado</span>',
+    };
+
+    async function cargarVentas() {
+      const ventas = await api('/ventas');
+      const tbody = document.getElementById('tbl-ventas');
+      if (ventas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Aun no hay ventas</td></tr>';
+        return;
+      }
+      tbody.innerHTML = ventas.map((v) => `
+        <tr>
+          <td>${v.id}</td>
+          <td>${formatoFecha(v.fecha)}</td>
+          <td>${escapeHtml(v.cliente_nombre || 'Mostrador')}</td>
+          <td>${escapeHtml(v.metodo_pago)}</td>
+          <td class="num">${formatoMoneda(v.total)}</td>
+          <td>${ESTADO_BADGE[v.estado] || v.estado}</td>
+          <td>${
+            v.envio_id ? ENVIO_BADGE[v.envio_estado] || v.envio_estado
+              : v.estado === 'completada' ? `<a href="/envios.html?venta=${v.id}">+ Registrar envio</a>` : ''
+          }</td>
+          <td>${v.estado === 'completada' ? `<button class="btn btn-sm btn-danger" data-anular="${v.id}">Anular</button>` : ''}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('tbl-ventas').addEventListener('click', async (e) => {
+      const id = e.target.dataset.anular;
+      if (!id) return;
+      if (!confirm('¿Anular esta venta? Esto repondra el stock.')) return;
+      try {
+        await api(`/ventas/${id}/anular`, { method: 'POST' });
+        toast('Venta anulada', 'success');
+        cargarVentas();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    cargarClientes();
+    cargarVentas();
+  })();
+  </script>
+</body>
+</html>

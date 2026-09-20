@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Proveedores - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Proveedores</h1>
+          <p>Contactos y datos de tus proveedores</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nuevo">+ Nuevo proveedor</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="buscar" placeholder="Buscar por nombre o RUT..." style="width:260px">
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Nombre</th><th>RUT</th><th>Contacto</th><th>Telefono</th><th>Email</th><th></th></tr>
+            </thead>
+            <tbody id="tbl"><tr><td colspan="6" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2 id="modal-titulo">Nuevo proveedor</h2>
+      <form id="form">
+        <input type="hidden" id="f-id">
+        <div class="field"><label>Nombre / razon social *</label><input id="f-nombre" required></div>
+        <div class="field-row">
+          <div class="field"><label>RUT</label><input id="f-rut"></div>
+          <div class="field"><label>Contacto</label><input id="f-contacto" placeholder="nombre de la persona"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Telefono</label><input id="f-telefono"></div>
+          <div class="field"><label>Email</label><input id="f-email" type="email"></div>
+        </div>
+        <div class="field"><label>Direccion</label><input id="f-direccion"></div>
+        <div class="field"><label>Notas</label><textarea id="f-notas" rows="2"></textarea></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    async function cargarTabla() {
+      const q = document.getElementById('buscar').value.trim();
+      const rows = await api(`/proveedores${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      const tbody = document.getElementById('tbl');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aun no hay proveedores</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((p) => `
+        <tr>
+          <td>${escapeHtml(p.nombre)}</td>
+          <td>${escapeHtml(p.rut || '')}</td>
+          <td>${escapeHtml(p.contacto || '')}</td>
+          <td>${escapeHtml(p.telefono || '')}</td>
+          <td>${escapeHtml(p.email || '')}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-editar="${p.id}">Editar</button>
+            <button class="btn btn-sm btn-danger" data-eliminar="${p.id}">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function abrirModal(p) {
+      document.getElementById('modal-titulo').textContent = p ? 'Editar proveedor' : 'Nuevo proveedor';
+      document.getElementById('f-id').value = p?.id || '';
+      document.getElementById('f-nombre').value = p?.nombre || '';
+      document.getElementById('f-rut').value = p?.rut || '';
+      document.getElementById('f-contacto').value = p?.contacto || '';
+      document.getElementById('f-telefono').value = p?.telefono || '';
+      document.getElementById('f-email').value = p?.email || '';
+      document.getElementById('f-direccion').value = p?.direccion || '';
+      document.getElementById('f-notas').value = p?.notas || '';
+      document.getElementById('modal').hidden = false;
+    }
+
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModal(null));
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const payload = {
+        nombre: document.getElementById('f-nombre').value.trim(),
+        rut: document.getElementById('f-rut').value.trim(),
+        contacto: document.getElementById('f-contacto').value.trim(),
+        telefono: document.getElementById('f-telefono').value.trim(),
+        email: document.getElementById('f-email').value.trim(),
+        direccion: document.getElementById('f-direccion').value.trim(),
+        notas: document.getElementById('f-notas').value.trim(),
+      };
+      try {
+        if (id) {
+          await api(`/proveedores/${id}`, { method: 'PUT', body: payload });
+        } else {
+          await api('/proveedores', { method: 'POST', body: payload });
+        }
+        toast('Proveedor guardado', 'success');
+        document.getElementById('modal').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('tbl').addEventListener('click', async (e) => {
+      const editarId = e.target.dataset.editar;
+      const eliminarId = e.target.dataset.eliminar;
+      if (editarId) {
+        const p = await api(`/proveedores/${editarId}`);
+        abrirModal(p);
+      } else if (eliminarId) {
+        if (!confirm('¿Eliminar este proveedor?')) return;
+        try {
+          await api(`/proveedores/${eliminarId}`, { method: 'DELETE' });
+          toast('Proveedor eliminado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    document.getElementById('buscar').addEventListener('input', debounce(cargarTabla, 300));
+    cargarTabla();
+  })();
+  </script>
+</body>
+</html>

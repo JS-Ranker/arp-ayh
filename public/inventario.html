@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Inventario - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Inventario</h1>
+          <p>Control de stock y movimientos</p>
+        </div>
+      </div>
+
+      <div class="grid grid-3" id="stat-tiles">
+        <div class="card stat-tile"><div class="label">Valor inventario (costo)</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Valor inventario (venta)</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile warn"><div class="label">Productos bajo stock minimo</div><div class="value">&mdash;</div></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:16px;align-items:start">
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:10px">
+            <h2 style="margin:0;font-size:15px;flex:1">Stock por producto</h2>
+            <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px">
+              <input type="checkbox" id="filtro-bajo-stock"> Solo bajo stock
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Minimo</th><th></th></tr></thead>
+              <tbody id="tbl-stock"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Movimientos recientes</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="num">Cantidad</th><th>Motivo</th></tr></thead>
+              <tbody id="tbl-movimientos"><tr><td colspan="5" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal-stock" hidden>
+    <div class="modal">
+      <h2>Ajustar stock</h2>
+      <p class="text-muted" id="stock-producto-nombre"></p>
+      <form id="form-stock">
+        <input type="hidden" id="s-id">
+        <div class="field">
+          <label>Tipo de movimiento</label>
+          <select id="s-tipo">
+            <option value="entrada">Entrada</option>
+            <option value="salida">Salida</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+        </div>
+        <div class="field"><label>Cantidad</label><input id="s-cantidad" type="number" min="0.01" step="1" required></div>
+        <div class="field"><label>Motivo</label><input id="s-motivo" placeholder="opcional"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Aplicar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    function badgeStock(p) {
+      return p.stock_actual <= p.stock_minimo
+        ? '<span class="badge badge-critical">bajo</span>'
+        : '<span class="badge badge-ok">ok</span>';
+    }
+
+    const TIPO_LABEL = { entrada: 'Entrada', salida: 'Salida', ajuste: 'Ajuste' };
+
+    async function cargarStats() {
+      const d = await api('/reportes/dashboard');
+      const tiles = document.querySelectorAll('#stat-tiles .stat-tile');
+      tiles[0].querySelector('.value').textContent = formatoMoneda(d.valorInventario.costo);
+      tiles[1].querySelector('.value').textContent = formatoMoneda(d.valorInventario.venta);
+      tiles[2].querySelector('.value').textContent = formatoNumero(d.bajoStock.cantidad);
+    }
+
+    async function cargarStock() {
+      const bajo = document.getElementById('filtro-bajo-stock').checked;
+      const productos = await api(`/productos?${bajo ? 'bajo_stock=1' : ''}`);
+      const tbody = document.getElementById('tbl-stock');
+      if (productos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sin resultados</td></tr>';
+        return;
+      }
+      tbody.innerHTML = productos.map((p) => `
+        <tr>
+          <td>${escapeHtml(p.nombre)} ${badgeStock(p)}</td>
+          <td class="num">${formatoNumero(p.stock_actual)}</td>
+          <td class="num">${formatoNumero(p.stock_minimo)}</td>
+          <td><button class="btn btn-sm" data-stock="${p.id}" data-nombre="${escapeHtml(p.nombre)}">Ajustar</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function cargarMovimientos() {
+      const rows = await api('/reportes/movimientos-recientes');
+      const tbody = document.getElementById('tbl-movimientos');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sin movimientos aun</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((m) => `
+        <tr>
+          <td>${formatoFecha(m.fecha)}</td>
+          <td>${escapeHtml(m.producto_nombre)}</td>
+          <td>${TIPO_LABEL[m.tipo] || m.tipo}</td>
+          <td class="num">${formatoNumero(m.cantidad)}</td>
+          <td>${escapeHtml(m.motivo || m.referencia || '')}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('tbl-stock').addEventListener('click', (e) => {
+      const id = e.target.dataset.stock;
+      if (!id) return;
+      document.getElementById('s-id').value = id;
+      document.getElementById('s-cantidad').value = '';
+      document.getElementById('s-motivo').value = '';
+      document.getElementById('stock-producto-nombre').textContent = e.target.dataset.nombre;
+      document.getElementById('modal-stock').hidden = false;
+    });
+
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form-stock').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('s-id').value;
+      try {
+        await api(`/productos/${id}/ajustar-stock`, {
+          method: 'POST',
+          body: {
+            tipo: document.getElementById('s-tipo').value,
+            cantidad: document.getElementById('s-cantidad').value,
+            motivo: document.getElementById('s-motivo').value.trim(),
+          },
+        });
+        toast('Stock actualizado', 'success');
+        document.getElementById('modal-stock').hidden = true;
+        cargarStats();
+        cargarStock();
+        cargarMovimientos();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('filtro-bajo-stock').addEventListener('change', cargarStock);
+
+    cargarStats();
+    cargarStock();
+    cargarMovimientos();
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Envios - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Envios</h1>
+          <p>Despacho de pedidos: reparto propio o retiro en tienda</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nuevo">+ Nuevo envio</button>
+      </div>
+
+      <div class="toolbar">
+        <select id="filtro-estado">
+          <option value="">Todos los estados</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="en_camino">En camino</option>
+          <option value="entregado">Entregado</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Venta</th><th>Cliente</th><th>Metodo</th><th>Destino / retiro</th>
+                <th>Estado</th><th>Fecha</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tbl"><tr><td colspan="7" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal-nuevo" hidden>
+    <div class="modal modal-wide">
+      <h2>Nuevo envio</h2>
+
+      <div class="field">
+        <label>Venta a despachar</label>
+        <select id="n-venta"><option value="">Selecciona una venta...</option></select>
+        <p class="hint">Solo se muestran ventas completadas que aun no tienen un envio registrado.</p>
+      </div>
+
+      <div class="field">
+        <label>Metodo</label>
+        <select id="n-metodo">
+          <option value="reparto_propio">Reparto propio</option>
+          <option value="retiro_tienda">Retiro en tienda</option>
+        </select>
+      </div>
+
+      <div id="n-campo-direccion">
+        <div class="field"><label>Direccion de entrega</label><input id="n-direccion" placeholder="Calle, numero, comuna..."></div>
+        <div class="field-row">
+          <div class="field"><label>Repartidor</label><input id="n-repartidor" placeholder="opcional"></div>
+          <div class="field"><label>Fecha estimada</label><input id="n-fecha" type="date"></div>
+        </div>
+      </div>
+
+      <div class="field"><label>Notas</label><textarea id="n-notas" rows="2"></textarea></div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-guardar-envio">Crear envio</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-editar" hidden>
+    <div class="modal modal-wide">
+      <h2>Envio de venta #<span id="e-venta-id"></span></h2>
+      <input type="hidden" id="e-id">
+
+      <div class="field">
+        <label>Metodo</label>
+        <select id="e-metodo">
+          <option value="reparto_propio">Reparto propio</option>
+          <option value="retiro_tienda">Retiro en tienda</option>
+        </select>
+      </div>
+
+      <div id="e-campo-direccion">
+        <div class="field"><label>Direccion de entrega</label><input id="e-direccion"></div>
+        <div class="field-row">
+          <div class="field"><label>Repartidor</label><input id="e-repartidor"></div>
+          <div class="field"><label>Fecha estimada</label><input id="e-fecha" type="date"></div>
+        </div>
+      </div>
+
+      <div class="field"><label>Notas</label><textarea id="e-notas" rows="2"></textarea></div>
+
+      <div class="field">
+        <label>Estado</label>
+        <div class="toolbar" style="margin-bottom:0">
+          <button type="button" class="btn btn-sm" data-estado="pendiente">Pendiente</button>
+          <button type="button" class="btn btn-sm" data-estado="en_camino">En camino</button>
+          <button type="button" class="btn btn-sm" data-estado="entregado">Entregado</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>Cerrar</button>
+        <button type="button" class="btn btn-primary" id="btn-guardar-cambios">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    const METODO_LABEL = { reparto_propio: 'Reparto propio', retiro_tienda: 'Retiro en tienda' };
+    const ESTADO_BADGE = {
+      pendiente: '<span class="badge badge-warn">pendiente</span>',
+      en_camino: '<span class="badge badge-info">en camino</span>',
+      entregado: '<span class="badge badge-ok">entregado</span>',
+    };
+
+    async function cargarTabla() {
+      const estado = document.getElementById('filtro-estado').value;
+      const rows = await api(`/envios${estado ? `?estado=${estado}` : ''}`);
+      const tbody = document.getElementById('tbl');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Aun no hay envios registrados</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((e) => `
+        <tr>
+          <td>#${e.venta_id}<div class="hint" style="margin:0">${formatoMoneda(e.venta_total)}</div></td>
+          <td>${escapeHtml(e.cliente_nombre || 'Mostrador')}</td>
+          <td>${METODO_LABEL[e.metodo] || e.metodo}</td>
+          <td>${e.metodo === 'retiro_tienda' ? '<span class="text-muted">Retiro en tienda</span>' : escapeHtml(e.direccion || '')}</td>
+          <td>${ESTADO_BADGE[e.estado] || e.estado}</td>
+          <td>${formatoFecha(e.creado_en)}</td>
+          <td><button class="btn btn-sm" data-ver="${e.id}">Ver / editar</button></td>
+        </tr>
+      `).join('');
+    }
+
+    function actualizarCampoDireccion(prefix) {
+      const metodo = document.getElementById(`${prefix}-metodo`).value;
+      document.getElementById(`${prefix}-campo-direccion`).hidden = metodo !== 'reparto_propio';
+    }
+
+    // ---- nuevo envio ----
+
+    async function abrirNuevo() {
+      const ventas = await api('/envios/ventas-disponibles');
+      const select = document.getElementById('n-venta');
+      select.innerHTML = '<option value="">Selecciona una venta...</option>' + ventas.map((v) => `
+        <option value="${v.id}" data-direccion="${escapeHtml(v.cliente_direccion || '')}">
+          #${v.id} - ${escapeHtml(v.cliente_nombre || 'Mostrador')} - ${formatoMoneda(v.total)} (${formatoFecha(v.fecha)})
+        </option>
+      `).join('');
+      document.getElementById('n-metodo').value = 'reparto_propio';
+      document.getElementById('n-direccion').value = '';
+      document.getElementById('n-repartidor').value = '';
+      document.getElementById('n-fecha').value = '';
+      document.getElementById('n-notas').value = '';
+      actualizarCampoDireccion('n');
+      document.getElementById('modal-nuevo').hidden = false;
+    }
+
+    document.getElementById('btn-nuevo').addEventListener('click', abrirNuevo);
+    document.getElementById('n-metodo').addEventListener('change', () => actualizarCampoDireccion('n'));
+    document.getElementById('e-metodo').addEventListener('change', () => actualizarCampoDireccion('e'));
+
+    document.getElementById('n-venta').addEventListener('change', (e) => {
+      const opcion = e.target.selectedOptions[0];
+      if (opcion && opcion.dataset.direccion) {
+        document.getElementById('n-direccion').value = opcion.dataset.direccion;
+      }
+    });
+
+    document.getElementById('btn-guardar-envio').addEventListener('click', async () => {
+      const ventaId = document.getElementById('n-venta').value;
+      if (!ventaId) { toast('Selecciona una venta', 'error'); return; }
+      try {
+        await api('/envios', {
+          method: 'POST',
+          body: {
+            venta_id: ventaId,
+            metodo: document.getElementById('n-metodo').value,
+            direccion: document.getElementById('n-direccion').value.trim(),
+            repartidor: document.getElementById('n-repartidor').value.trim(),
+            fecha_estimada: document.getElementById('n-fecha').value,
+            notas: document.getElementById('n-notas').value.trim(),
+          },
+        });
+        toast('Envio creado', 'success');
+        document.getElementById('modal-nuevo').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    // ---- ver / editar envio ----
+
+    async function abrirEditar(id) {
+      const envio = await api(`/envios/${id}`);
+      document.getElementById('e-id').value = envio.id;
+      document.getElementById('e-venta-id').textContent = envio.venta_id;
+      document.getElementById('e-metodo').value = envio.metodo;
+      document.getElementById('e-direccion').value = envio.direccion || '';
+      document.getElementById('e-repartidor').value = envio.repartidor || '';
+      document.getElementById('e-fecha').value = envio.fecha_estimada || '';
+      document.getElementById('e-notas').value = envio.notas || '';
+      actualizarCampoDireccion('e');
+
+      document.querySelectorAll('#modal-editar [data-estado]').forEach((btn) => {
+        btn.classList.toggle('btn-primary', btn.dataset.estado === envio.estado);
+      });
+
+      document.getElementById('modal-editar').hidden = false;
+    }
+
+    document.getElementById('tbl').addEventListener('click', (e) => {
+      const id = e.target.dataset.ver;
+      if (id) abrirEditar(id);
+    });
+
+    document.querySelectorAll('#modal-editar [data-estado]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = document.getElementById('e-id').value;
+        try {
+          await api(`/envios/${id}/estado`, { method: 'POST', body: { estado: btn.dataset.estado } });
+          document.querySelectorAll('#modal-editar [data-estado]').forEach((b) => {
+            b.classList.toggle('btn-primary', b === btn);
+          });
+          toast('Estado actualizado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+    });
+
+    document.getElementById('btn-guardar-cambios').addEventListener('click', async () => {
+      const id = document.getElementById('e-id').value;
+      try {
+        await api(`/envios/${id}`, {
+          method: 'PUT',
+          body: {
+            metodo: document.getElementById('e-metodo').value,
+            direccion: document.getElementById('e-direccion').value.trim(),
+            repartidor: document.getElementById('e-repartidor').value.trim(),
+            fecha_estimada: document.getElementById('e-fecha').value,
+            notas: document.getElementById('e-notas').value.trim(),
+          },
+        });
+        toast('Envio actualizado', 'success');
+        document.getElementById('modal-editar').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('filtro-estado').addEventListener('change', cargarTabla);
+
+    cargarTabla();
+
+    const ventaPreseleccionada = new URLSearchParams(location.search).get('venta');
+    if (ventaPreseleccionada) {
+      abrirNuevo().then(() => {
+        document.getElementById('n-venta').value = ventaPreseleccionada;
+        document.getElementById('n-venta').dispatchEvent(new Event('change'));
+      });
+    }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Reportes - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Reportes</h1>
+          <p>Ventas por periodo, productos mas vendidos y valorizacion de inventario</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar" style="margin-bottom:4px">
+          <h2 style="margin:0;font-size:15px;flex:1">Ventas por dia (ultimos 30 dias)</h2>
+        </div>
+        <div class="chart-bars" id="chart-ventas"></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:16px;align-items:start">
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Productos mas vendidos</h2>
+          <div class="field-row">
+            <div class="field"><label>Desde</label><input type="date" id="f-desde"></div>
+            <div class="field"><label>Hasta</label><input type="date" id="f-hasta"></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Total</th><th class="num">Utilidad</th></tr></thead>
+              <tbody id="tbl-top"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Valorizacion de inventario</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Stock</th><th class="num">Valor costo</th><th class="num">Valor venta</th></tr></thead>
+              <tbody id="tbl-valorizacion"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    function fechaISO(d) { return d.toISOString().slice(0, 10); }
+
+    async function cargarChart() {
+      const hasta = new Date();
+      const desde = new Date();
+      desde.setDate(desde.getDate() - 29);
+      const rows = await api(`/reportes/ventas-por-periodo?desde=${fechaISO(desde)}&hasta=${fechaISO(hasta)}&agrupar=dia`);
+      const porFecha = new Map(rows.map((r) => [r.periodo, r]));
+
+      const dias = [];
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(desde);
+        d.setDate(d.getDate() + i);
+        dias.push(fechaISO(d));
+      }
+      const max = Math.max(1, ...dias.map((f) => porFecha.get(f)?.total || 0));
+
+      const cont = document.getElementById('chart-ventas');
+      cont.innerHTML = dias.map((f) => {
+        const total = porFecha.get(f)?.total || 0;
+        const alturaPct = Math.max(2, (total / max) * 100);
+        const [, m, d] = f.split('-');
+        const mostrarEtiqueta = Number(d) % 5 === 1 || Number(d) === 1;
+        return `
+          <div class="bar-wrap">
+            <div class="bar-tooltip">${d}-${m}: ${formatoMoneda(total)}</div>
+            <div class="bar" style="height:${alturaPct}%"></div>
+            <div class="bar-label">${mostrarEtiqueta ? d : ''}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function cargarTop() {
+      const desde = document.getElementById('f-desde').value;
+      const hasta = document.getElementById('f-hasta').value;
+      const params = new URLSearchParams({ limite: '20' });
+      if (desde) params.set('desde', desde);
+      if (hasta) params.set('hasta', hasta);
+      const rows = await api(`/reportes/productos-mas-vendidos?${params.toString()}`);
+      const tbody = document.getElementById('tbl-top');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sin ventas en el periodo</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((r) => `
+        <tr>
+          <td>${escapeHtml(r.producto_nombre)}</td>
+          <td class="num">${formatoNumero(r.cantidad_vendida)}</td>
+          <td class="num">${formatoMoneda(r.total_vendido)}</td>
+          <td class="num">${formatoMoneda(r.utilidad)}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function cargarValorizacion() {
+      const rows = await api('/reportes/valorizacion-inventario');
+      const tbody = document.getElementById('tbl-valorizacion');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sin productos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((r) => `
+        <tr>
+          <td>${escapeHtml(r.nombre)}</td>
+          <td class="num">${formatoNumero(r.stock_actual)}</td>
+          <td class="num">${formatoMoneda(r.valor_costo)}</td>
+          <td class="num">${formatoMoneda(r.valor_venta)}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('f-desde').addEventListener('change', cargarTop);
+    document.getElementById('f-hasta').addEventListener('change', cargarTop);
+
+    cargarChart();
+    cargarTop();
+    cargarValorizacion();
+  })();
+  </script>
+</body>
+</html>

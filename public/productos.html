@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Productos - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Productos y precios</h1>
+          <p>Catalogo, precios de costo/venta y margenes</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nuevo">+ Nuevo producto</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="buscar" placeholder="Buscar por nombre o SKU..." style="width:260px">
+        <select id="filtro-categoria"><option value="">Todas las categorias</option></select>
+        <label style="display:flex;align-items:center;gap:6px;margin:0">
+          <input type="checkbox" id="filtro-bajo-stock"> Solo stock bajo
+        </label>
+        <div class="spacer"></div>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th><th>Nombre</th><th>Categoria</th><th>Proveedor</th>
+                <th class="num">Costo</th><th class="num">Venta</th><th class="num">Margen</th>
+                <th class="num">Stock</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tbl-productos"><tr><td colspan="9" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal-producto" hidden>
+    <div class="modal">
+      <h2 id="modal-titulo">Nuevo producto</h2>
+      <form id="form-producto">
+        <input type="hidden" id="p-id">
+        <div class="field-row">
+          <div class="field"><label>SKU / codigo</label><input id="p-sku" placeholder="opcional"></div>
+          <div class="field"><label>Unidad</label><input id="p-unidad" value="un"></div>
+        </div>
+        <div class="field"><label>Nombre *</label><input id="p-nombre" required></div>
+        <div class="field"><label>Descripcion</label><textarea id="p-descripcion" rows="2"></textarea></div>
+        <div class="field-row">
+          <div class="field">
+            <label>Categoria</label>
+            <div style="display:flex;gap:6px">
+              <select id="p-categoria" style="flex:1"><option value="">Sin categoria</option></select>
+              <button type="button" class="btn btn-sm" id="btn-nueva-categoria">+</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Proveedor</label>
+            <select id="p-proveedor"><option value="">Sin proveedor</option></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Precio costo</label><input id="p-costo" type="number" min="0" step="1" value="0"></div>
+          <div class="field"><label>Precio venta</label><input id="p-venta" type="number" min="0" step="1" value="0"></div>
+        </div>
+        <div class="field-row">
+          <div class="field" id="campo-stock-inicial"><label>Stock inicial</label><input id="p-stock" type="number" min="0" step="1" value="0"></div>
+          <div class="field"><label>Stock minimo (alerta)</label><input id="p-stock-min" type="number" min="0" step="1" value="0"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-stock" hidden>
+    <div class="modal">
+      <h2>Ajustar stock</h2>
+      <p class="text-muted" id="stock-producto-nombre"></p>
+      <form id="form-stock">
+        <input type="hidden" id="s-id">
+        <div class="field">
+          <label>Tipo de movimiento</label>
+          <select id="s-tipo">
+            <option value="entrada">Entrada (compra, devolucion, etc.)</option>
+            <option value="salida">Salida (merma, uso interno, etc.)</option>
+            <option value="ajuste">Ajuste (correccion de inventario)</option>
+          </select>
+        </div>
+        <div class="field"><label>Cantidad</label><input id="s-cantidad" type="number" min="0.01" step="1" required></div>
+        <div class="field"><label>Motivo</label><input id="s-motivo" placeholder="opcional"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Aplicar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    let categorias = [];
+    let proveedores = [];
+
+    function margen(costo, venta) {
+      if (!venta) return null;
+      return ((venta - costo) / venta) * 100;
+    }
+
+    function badgeStock(p) {
+      if (p.stock_actual <= p.stock_minimo) return '<span class="badge badge-critical">bajo</span>';
+      return '';
+    }
+
+    async function cargarSelects() {
+      [categorias, proveedores] = await Promise.all([
+        api('/categorias'),
+        api('/proveedores'),
+      ]);
+      const catOptions = categorias.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
+      document.getElementById('filtro-categoria').insertAdjacentHTML('beforeend', catOptions);
+      document.getElementById('p-categoria').insertAdjacentHTML('beforeend', catOptions);
+      document.getElementById('p-proveedor').insertAdjacentHTML('beforeend',
+        proveedores.map((p) => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join(''));
+    }
+
+    async function cargarTabla() {
+      const params = new URLSearchParams();
+      const q = document.getElementById('buscar').value.trim();
+      const catId = document.getElementById('filtro-categoria').value;
+      const bajo = document.getElementById('filtro-bajo-stock').checked;
+      if (q) params.set('q', q);
+      if (catId) params.set('categoria_id', catId);
+      if (bajo) params.set('bajo_stock', '1');
+
+      const productos = await api(`/productos?${params.toString()}`);
+      const tbody = document.getElementById('tbl-productos');
+      if (productos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No hay productos que coincidan</td></tr>';
+        return;
+      }
+      tbody.innerHTML = productos.map((p) => {
+        const m = margen(p.precio_costo, p.precio_venta);
+        return `
+        <tr>
+          <td>${escapeHtml(p.sku || '')}</td>
+          <td>${escapeHtml(p.nombre)}</td>
+          <td>${escapeHtml(p.categoria_nombre || '')}</td>
+          <td>${escapeHtml(p.proveedor_nombre || '')}</td>
+          <td class="num">${formatoMoneda(p.precio_costo)}</td>
+          <td class="num">${formatoMoneda(p.precio_venta)}</td>
+          <td class="num">${m == null ? '-' : m.toFixed(0) + '%'}</td>
+          <td class="num">${formatoNumero(p.stock_actual)} ${badgeStock(p)}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-editar="${p.id}">Editar</button>
+            <button class="btn btn-sm" data-stock="${p.id}" data-nombre="${escapeHtml(p.nombre)}">Stock</button>
+            <button class="btn btn-sm btn-danger" data-eliminar="${p.id}">Eliminar</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function abrirModalProducto(producto) {
+      document.getElementById('modal-titulo').textContent = producto ? 'Editar producto' : 'Nuevo producto';
+      document.getElementById('p-id').value = producto?.id || '';
+      document.getElementById('p-sku').value = producto?.sku || '';
+      document.getElementById('p-unidad').value = producto?.unidad || 'un';
+      document.getElementById('p-nombre').value = producto?.nombre || '';
+      document.getElementById('p-descripcion').value = producto?.descripcion || '';
+      document.getElementById('p-categoria').value = producto?.categoria_id || '';
+      document.getElementById('p-proveedor').value = producto?.proveedor_id || '';
+      document.getElementById('p-costo').value = producto?.precio_costo ?? 0;
+      document.getElementById('p-venta').value = producto?.precio_venta ?? 0;
+      document.getElementById('p-stock').value = producto?.stock_actual ?? 0;
+      document.getElementById('p-stock-min').value = producto?.stock_minimo ?? 0;
+      document.getElementById('campo-stock-inicial').style.display = producto ? 'none' : '';
+      document.getElementById('modal-producto').hidden = false;
+    }
+
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModalProducto(null));
+
+    document.getElementById('btn-nueva-categoria').addEventListener('click', async () => {
+      const nombre = prompt('Nombre de la nueva categoria:');
+      if (!nombre || !nombre.trim()) return;
+      try {
+        const categoria = await api('/categorias', { method: 'POST', body: { nombre: nombre.trim() } });
+        categorias.push(categoria);
+        const opcion = `<option value="${categoria.id}">${escapeHtml(categoria.nombre)}</option>`;
+        document.getElementById('filtro-categoria').insertAdjacentHTML('beforeend', opcion);
+        document.getElementById('p-categoria').insertAdjacentHTML('beforeend', opcion);
+        document.getElementById('p-categoria').value = categoria.id;
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form-producto').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('p-id').value;
+      const payload = {
+        sku: document.getElementById('p-sku').value.trim(),
+        unidad: document.getElementById('p-unidad').value.trim() || 'un',
+        nombre: document.getElementById('p-nombre').value.trim(),
+        descripcion: document.getElementById('p-descripcion').value.trim(),
+        categoria_id: document.getElementById('p-categoria').value || null,
+        proveedor_id: document.getElementById('p-proveedor').value || null,
+        precio_costo: document.getElementById('p-costo').value,
+        precio_venta: document.getElementById('p-venta').value,
+        stock_actual: document.getElementById('p-stock').value,
+        stock_minimo: document.getElementById('p-stock-min').value,
+      };
+      try {
+        if (id) {
+          await api(`/productos/${id}`, { method: 'PUT', body: payload });
+          toast('Producto actualizado', 'success');
+        } else {
+          await api('/productos', { method: 'POST', body: payload });
+          toast('Producto creado', 'success');
+        }
+        document.getElementById('modal-producto').hidden = true;
+        cargarTabla();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    });
+
+    document.getElementById('form-stock').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('s-id').value;
+      try {
+        await api(`/productos/${id}/ajustar-stock`, {
+          method: 'POST',
+          body: {
+            tipo: document.getElementById('s-tipo').value,
+            cantidad: document.getElementById('s-cantidad').value,
+            motivo: document.getElementById('s-motivo').value.trim(),
+          },
+        });
+        toast('Stock actualizado', 'success');
+        document.getElementById('modal-stock').hidden = true;
+        cargarTabla();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    });
+
+    document.getElementById('tbl-productos').addEventListener('click', async (e) => {
+      const editarId = e.target.dataset.editar;
+      const stockId = e.target.dataset.stock;
+      const eliminarId = e.target.dataset.eliminar;
+
+      if (editarId) {
+        const producto = await api(`/productos/${editarId}`);
+        abrirModalProducto(producto);
+      } else if (stockId) {
+        document.getElementById('s-id').value = stockId;
+        document.getElementById('s-cantidad').value = '';
+        document.getElementById('s-motivo').value = '';
+        document.getElementById('stock-producto-nombre').textContent = e.target.dataset.nombre;
+        document.getElementById('modal-stock').hidden = false;
+      } else if (eliminarId) {
+        if (!confirm('¿Eliminar este producto? No se podra deshacer.')) return;
+        try {
+          await api(`/productos/${eliminarId}`, { method: 'DELETE' });
+          toast('Producto eliminado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    document.getElementById('buscar').addEventListener('input', debounce(cargarTabla, 300));
+    document.getElementById('filtro-categoria').addEventListener('change', cargarTabla);
+    document.getElementById('filtro-bajo-stock').addEventListener('change', cargarTabla);
+
+    (async () => {
+      await cargarSelects();
+      await cargarTabla();
+    })();
+  })();
+  </script>
+</body>
+</html>
