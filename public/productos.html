@@ -44,7 +44,7 @@
       </div>
 
   <div class="modal-backdrop" id="modal-producto" hidden>
-    <div class="modal">
+    <div class="modal modal-wide">
       <h2 id="modal-titulo">Nuevo producto</h2>
       <form id="form-producto">
         <input type="hidden" id="p-id">
@@ -71,6 +71,41 @@
           <div class="field"><label>Precio costo</label><input id="p-costo" type="number" min="0" step="1" value="0"></div>
           <div class="field"><label>Precio venta</label><input id="p-venta" type="number" min="0" step="1" value="0"></div>
         </div>
+
+        <div class="card" style="margin:4px 0 16px;padding:12px;background:var(--paper-2)">
+          <div class="toolbar" style="margin-bottom:8px">
+            <strong style="flex:1;font-size:13px">Calculadora de costo y precio</strong>
+            <button type="button" class="btn btn-sm" id="btn-calc-agregar">+ Agregar insumo</button>
+          </div>
+          <p class="hint" style="margin-top:0">Suma lo que usas para producir 1 unidad: papel, tinta, taza en blanco, electricidad, etc. (edita esos costos en <a href="/insumos.html" target="_blank">Insumos y costos</a>, se abre en otra pestaña para no perder este formulario).</p>
+          <p class="hint" style="margin-top:0">Si un insumo rinde para varias unidades (ej: de 1 hoja A4 sacas 3 tazas), pon la cantidad que usas y en "rinde x" cuantas unidades salen de esa cantidad: el sistema divide el costo solo.</p>
+          <p class="hint" style="margin-top:0">Para electricidad (insumo en kWh): usa el boton &#9889; de esa fila para calcular el consumo solo con la potencia de la maquina (W) y el tiempo que la usas.</p>
+          <div id="calc-items"></div>
+          <p class="hint" style="margin:10px 0 0">Merma: el % de unidades que se pierden (taza rota, impresion fallada, etc.). El sistema sube el costo solo para cubrir esa perdida. 5% es un punto de partida razonable; ajustalo segun tu experiencia real.</p>
+          <div class="field-row" style="margin-top:6px;align-items:flex-end;flex-wrap:wrap">
+            <div class="field" style="max-width:150px">
+              <label>Merma esperada (%)</label>
+              <input id="calc-merma" type="number" min="0" max="95" step="1" value="5">
+            </div>
+            <div class="field" style="max-width:150px">
+              <label>Margen deseado (%)</label>
+              <input id="calc-margen" type="number" min="0" step="1" value="40">
+            </div>
+            <div class="field" style="flex:1;min-width:260px">
+              <label>Resultado</label>
+              <div style="font-size:13.5px;line-height:1.6">
+                Costo de materiales: <strong id="calc-costo-materiales">$0</strong><br>
+                + Merma (<span id="calc-merma-pct">5</span>%): <strong id="calc-costo-merma">$0</strong><br>
+                Costo de produccion (piso): <strong id="calc-costo-total">$0</strong><br>
+                Precio de venta sugerido: <strong id="calc-precio-sugerido">$0</strong>
+              </div>
+            </div>
+            <div class="field">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-calc-usar">Usar este precio</button>
+            </div>
+          </div>
+        </div>
+
         <div class="field-row">
           <div class="field" id="campo-stock-inicial"><label>Stock inicial</label><input id="p-stock" type="number" min="0" step="1" value="0"></div>
           <div class="field"><label>Stock minimo (alerta)</label><input id="p-stock-min" type="number" min="0" step="1" value="0"></div>
@@ -116,6 +151,8 @@
   (function () {
     let categorias = [];
     let proveedores = [];
+    let insumosDisponibles = [];
+    let calcItems = [];
 
     function margen(costo, venta) {
       if (!venta) return null;
@@ -125,6 +162,82 @@
     function badgeStock(p) {
       if (p.stock_actual <= p.stock_minimo) return '<span class="badge badge-critical">bajo</span>';
       return '';
+    }
+
+    async function cargarInsumosDisponibles() {
+      insumosDisponibles = await api('/insumos');
+    }
+
+    function calcularKwh(item) {
+      const potencia = Number(item._kwhPot) || 0;
+      const segundos = Number(item._kwhTiempo) || 0;
+      const ciclos = Number(item._kwhCiclos) || 1;
+      return (potencia * segundos * ciclos) / 1000 / 3600;
+    }
+
+    function renderCalcItems() {
+      const cont = document.getElementById('calc-items');
+      if (calcItems.length === 0) {
+        cont.innerHTML = '<p class="hint" style="margin:6px 0">Aun no has agregado insumos a este calculo.</p>';
+      } else if (insumosDisponibles.length === 0) {
+        cont.innerHTML = '<p class="hint" style="margin:6px 0">No hay insumos cargados todavia.</p>';
+      } else {
+        cont.innerHTML = `
+          <div class="cart-line" style="border-bottom:none;padding-bottom:2px">
+            <div style="flex:1"></div>
+            <div style="width:80px" class="hint">cantidad</div>
+            <div style="width:70px" class="hint">rinde x</div>
+            <div class="hint" style="width:90px;text-align:right">costo/unidad</div>
+            <div style="width:26px"></div>
+          </div>
+        ` + calcItems.map((item, i) => {
+          const insumo = insumosDisponibles.find((ins) => ins.id === Number(item.insumo_id));
+          const rinde = Number(item.rinde_unidades) || 1;
+          const subtotal = ((insumo ? insumo.costo_unitario : 0) * (Number(item.cantidad) || 0)) / rinde;
+          return `
+            <div class="cart-line">
+              <select data-calc-insumo="${i}" style="flex:1">
+                ${insumosDisponibles.map((ins) => `<option value="${ins.id}" ${Number(item.insumo_id) === ins.id ? 'selected' : ''}>${escapeHtml(ins.nombre)} (${escapeHtml(ins.unidad)})</option>`).join('')}
+              </select>
+              <input type="number" min="0" step="any" value="${item.cantidad}" data-calc-cant="${i}" style="width:80px" placeholder="cantidad">
+              <input type="number" min="1" step="any" value="${rinde}" data-calc-rinde="${i}" style="width:70px" placeholder="rinde x">
+              <div style="width:90px;text-align:right">${formatoMoneda(subtotal)}</div>
+              <button type="button" class="btn btn-sm" data-calc-kwh="${i}" title="Calcular consumo electrico por potencia y tiempo">&#9889;</button>
+              <button type="button" class="btn btn-sm btn-danger" data-calc-quitar="${i}">&times;</button>
+            </div>
+            ${item._kwhAbierto ? `
+            <div class="cart-line" style="background:var(--paper);border-radius:8px;padding:6px 8px;margin:-4px 0 8px;flex-wrap:wrap">
+              <div class="hint" style="flex:1 1 100%;margin-bottom:4px">Consumo electrico: potencia de la maquina, segundos que demora 1 ciclo y cuantos ciclos hace por unidad.</div>
+              <input type="number" min="0" step="any" placeholder="Potencia (W)" value="${item._kwhPot ?? ''}" data-kwh-pot="${i}" style="width:110px">
+              <input type="number" min="0" step="any" placeholder="Segundos por ciclo" value="${item._kwhTiempo ?? ''}" data-kwh-tiempo="${i}" style="width:140px">
+              <input type="number" min="1" step="1" placeholder="N de ciclos" value="${item._kwhCiclos ?? 1}" data-kwh-ciclos="${i}" style="width:100px">
+              <div class="hint" style="width:130px" data-kwh-preview="${i}">= ${calcularKwh(item).toFixed(5)} kWh</div>
+              <button type="button" class="btn btn-sm btn-primary" data-kwh-usar="${i}">Usar</button>
+            </div>
+            ` : ''}
+          `;
+        }).join('');
+      }
+      return recalcularTotales();
+    }
+
+    function recalcularTotales() {
+      const costoMateriales = calcItems.reduce((sum, item) => {
+        const insumo = insumosDisponibles.find((ins) => ins.id === Number(item.insumo_id));
+        const rinde = Number(item.rinde_unidades) || 1;
+        return sum + ((insumo ? insumo.costo_unitario : 0) * (Number(item.cantidad) || 0)) / rinde;
+      }, 0);
+      const mermaPct = Math.min(Math.max(Number(document.getElementById('calc-merma').value) || 0, 0), 95);
+      const costoTotal = costoMateriales / (1 - mermaPct / 100);
+      const costoMerma = costoTotal - costoMateriales;
+      const margenPct = Number(document.getElementById('calc-margen').value) || 0;
+      const precioSugerido = Math.round((costoTotal * (1 + margenPct / 100)) / 10) * 10;
+      document.getElementById('calc-costo-materiales').textContent = formatoMoneda(costoMateriales);
+      document.getElementById('calc-merma-pct').textContent = mermaPct;
+      document.getElementById('calc-costo-merma').textContent = formatoMoneda(costoMerma);
+      document.getElementById('calc-costo-total').textContent = formatoMoneda(costoTotal);
+      document.getElementById('calc-precio-sugerido').textContent = formatoMoneda(precioSugerido);
+      return { costoTotal, precioSugerido };
     }
 
     async function cargarSelects() {
@@ -175,7 +288,7 @@
       }).join('');
     }
 
-    function abrirModalProducto(producto) {
+    async function abrirModalProducto(producto) {
       document.getElementById('modal-titulo').textContent = producto ? 'Editar producto' : 'Nuevo producto';
       document.getElementById('p-id').value = producto?.id || '';
       document.getElementById('p-sku').value = producto?.sku || '';
@@ -189,6 +302,28 @@
       document.getElementById('p-stock').value = producto?.stock_actual ?? 0;
       document.getElementById('p-stock-min').value = producto?.stock_minimo ?? 0;
       document.getElementById('campo-stock-inicial').style.display = producto ? 'none' : '';
+
+      let margenGuardado = 40;
+      let mermaGuardada = 5;
+      try {
+        const guardado = localStorage.getItem('erp_calc_margen');
+        if (guardado) margenGuardado = Number(guardado);
+        const mermaGuardadaLS = localStorage.getItem('erp_calc_merma');
+        if (mermaGuardadaLS) mermaGuardada = Number(mermaGuardadaLS);
+      } catch (err) { /* almacenamiento no disponible */ }
+      document.getElementById('calc-margen').value = margenGuardado;
+      document.getElementById('calc-merma').value = mermaGuardada;
+
+      calcItems = [];
+      await cargarInsumosDisponibles();
+      if (producto) {
+        try {
+          const receta = await api(`/productos/${producto.id}/receta`);
+          calcItems = receta.items.map((it) => ({ insumo_id: it.insumo_id, cantidad: it.cantidad, rinde_unidades: it.rinde_unidades }));
+        } catch (err) { /* sin receta guardada aun */ }
+      }
+      renderCalcItems();
+
       document.getElementById('modal-producto').hidden = false;
     }
 
@@ -213,6 +348,88 @@
       btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
     });
 
+    document.getElementById('btn-calc-agregar').addEventListener('click', () => {
+      if (insumosDisponibles.length === 0) {
+        toast('Primero agrega insumos en "Insumos y costos"', 'error');
+        return;
+      }
+      calcItems.push({ insumo_id: insumosDisponibles[0].id, cantidad: 1, rinde_unidades: 1 });
+      renderCalcItems();
+    });
+
+    document.getElementById('calc-items').addEventListener('input', (e) => {
+      const kwhPotIdx = e.target.dataset.kwhPot;
+      const kwhTiempoIdx = e.target.dataset.kwhTiempo;
+      const kwhCiclosIdx = e.target.dataset.kwhCiclos;
+      const kwhIdx = kwhPotIdx ?? kwhTiempoIdx ?? kwhCiclosIdx;
+      if (kwhIdx != null) {
+        if (kwhPotIdx != null) calcItems[kwhIdx]._kwhPot = e.target.value;
+        if (kwhTiempoIdx != null) calcItems[kwhIdx]._kwhTiempo = e.target.value;
+        if (kwhCiclosIdx != null) calcItems[kwhIdx]._kwhCiclos = e.target.value;
+        const preview = document.querySelector(`[data-kwh-preview="${kwhIdx}"]`);
+        if (preview) preview.textContent = `= ${calcularKwh(calcItems[kwhIdx]).toFixed(5)} kWh`;
+        return;
+      }
+
+      const cantIdx = e.target.dataset.calcCant;
+      const rindeIdx = e.target.dataset.calcRinde;
+      const idx = cantIdx ?? rindeIdx;
+      if (idx == null) return;
+      if (cantIdx != null) calcItems[idx].cantidad = e.target.value;
+      if (rindeIdx != null) calcItems[idx].rinde_unidades = e.target.value;
+      const insumo = insumosDisponibles.find((ins) => ins.id === Number(calcItems[idx].insumo_id));
+      const rinde = Number(calcItems[idx].rinde_unidades) || 1;
+      const subtotal = ((insumo ? insumo.costo_unitario : 0) * (Number(calcItems[idx].cantidad) || 0)) / rinde;
+      e.target.closest('.cart-line').querySelector('div').textContent = formatoMoneda(subtotal);
+      recalcularTotales();
+    });
+
+    document.getElementById('calc-items').addEventListener('change', (e) => {
+      const insumoIdx = e.target.dataset.calcInsumo;
+      if (insumoIdx == null) return;
+      calcItems[insumoIdx].insumo_id = e.target.value;
+      renderCalcItems();
+    });
+
+    document.getElementById('calc-items').addEventListener('click', (e) => {
+      const quitarIdx = e.target.dataset.calcQuitar;
+      const kwhIdx = e.target.dataset.calcKwh;
+      const usarIdx = e.target.dataset.kwhUsar;
+      if (quitarIdx != null) {
+        calcItems.splice(quitarIdx, 1);
+        renderCalcItems();
+        return;
+      }
+      if (kwhIdx != null) {
+        calcItems[kwhIdx]._kwhAbierto = !calcItems[kwhIdx]._kwhAbierto;
+        renderCalcItems();
+        return;
+      }
+      if (usarIdx != null) {
+        const item = calcItems[usarIdx];
+        item.cantidad = Math.round(calcularKwh(item) * 100000) / 100000;
+        item._kwhAbierto = false;
+        renderCalcItems();
+      }
+    });
+
+    document.getElementById('calc-margen').addEventListener('input', () => {
+      recalcularTotales();
+      try { localStorage.setItem('erp_calc_margen', document.getElementById('calc-margen').value); } catch (err) { /* ignorar */ }
+    });
+
+    document.getElementById('calc-merma').addEventListener('input', () => {
+      recalcularTotales();
+      try { localStorage.setItem('erp_calc_merma', document.getElementById('calc-merma').value); } catch (err) { /* ignorar */ }
+    });
+
+    document.getElementById('btn-calc-usar').addEventListener('click', () => {
+      const { costoTotal, precioSugerido } = recalcularTotales();
+      document.getElementById('p-costo').value = Math.round(costoTotal);
+      document.getElementById('p-venta').value = Math.round(precioSugerido);
+      toast('Precio aplicado al formulario, revisalo antes de guardar', 'success');
+    });
+
     document.getElementById('form-producto').addEventListener('submit', async (e) => {
       e.preventDefault();
       const id = document.getElementById('p-id').value;
@@ -229,13 +446,19 @@
         stock_minimo: document.getElementById('p-stock-min').value,
       };
       try {
+        let productoId = id;
         if (id) {
           await api(`/productos/${id}`, { method: 'PUT', body: payload });
           toast('Producto actualizado', 'success');
         } else {
-          await api('/productos', { method: 'POST', body: payload });
+          const nuevo = await api('/productos', { method: 'POST', body: payload });
+          productoId = nuevo.id;
           toast('Producto creado', 'success');
         }
+        await api(`/productos/${productoId}/receta`, {
+          method: 'PUT',
+          body: { items: calcItems.filter((it) => it.insumo_id).map((it) => ({ insumo_id: it.insumo_id, cantidad: it.cantidad, rinde_unidades: it.rinde_unidades })) },
+        });
         document.getElementById('modal-producto').hidden = true;
         cargarTabla();
       } catch (e) {

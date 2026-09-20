@@ -8,6 +8,8 @@ const ICONS = {
   proveedores: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/></svg>',
   clientes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>',
   reportes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>',
+  insumos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6M10 2v5.5L4.8 17a2 2 0 0 0 1.8 3h10.8a2 2 0 0 0 1.8-3L14 7.5V2"/><path d="M7 14h10"/></svg>',
+  equilibrio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M3 20 12 6"/><path d="M21 20 12 6"/><circle cx="12" cy="6" r="1.6" fill="currentColor" stroke="none"/></svg>',
 };
 
 const NAV_ITEMS = [
@@ -15,11 +17,13 @@ const NAV_ITEMS = [
   { href: '/ventas.html', label: 'Ventas', icon: ICONS.ventas },
   { href: '/envios.html', label: 'Envios', icon: ICONS.envios },
   { href: '/productos.html', label: 'Productos y precios', icon: ICONS.productos },
+  { href: '/insumos.html', label: 'Insumos y costos', icon: ICONS.insumos },
   { href: '/inventario.html', label: 'Inventario', icon: ICONS.inventario },
   { href: '/compras.html', label: 'Compras', icon: ICONS.compras },
   { href: '/proveedores.html', label: 'Proveedores', icon: ICONS.proveedores },
   { href: '/clientes.html', label: 'Clientes', icon: ICONS.clientes },
   { href: '/reportes.html', label: 'Reportes', icon: ICONS.reportes },
+  { href: '/punto-equilibrio.html', label: 'Punto de equilibrio', icon: ICONS.equilibrio },
 ];
 
 function renderNav() {

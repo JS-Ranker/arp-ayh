@@ -119,11 +119,47 @@ CREATE TABLE IF NOT EXISTS envios (
   creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS insumos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  unidad TEXT NOT NULL DEFAULT 'unidad',
+  costo_unitario REAL NOT NULL DEFAULT 0,
+  notas TEXT,
+  activo INTEGER NOT NULL DEFAULT 1,
+  creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS producto_insumos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+  insumo_id INTEGER NOT NULL REFERENCES insumos(id) ON DELETE CASCADE,
+  cantidad REAL NOT NULL,
+  rinde_unidades REAL NOT NULL DEFAULT 1,
+  UNIQUE(producto_id, insumo_id)
+);
+
+CREATE TABLE IF NOT EXISTS costos_fijos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  monto REAL NOT NULL DEFAULT 0,
+  periodicidad TEXT NOT NULL DEFAULT 'mensual', -- mensual | anual
+  notas TEXT,
+  activo INTEGER NOT NULL DEFAULT 1,
+  creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre);
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
 CREATE INDEX IF NOT EXISTS idx_movimientos_producto ON movimientos_inventario(producto_id);
 CREATE INDEX IF NOT EXISTS idx_envios_estado ON envios(estado);
+CREATE INDEX IF NOT EXISTS idx_producto_insumos_producto ON producto_insumos(producto_id);
 `);
+
+// Migraciones para bases de datos creadas antes de agregar esta columna.
+const columnasProductoInsumos = db.prepare(`PRAGMA table_info(producto_insumos)`).all();
+if (!columnasProductoInsumos.some((c) => c.name === 'rinde_unidades')) {
+  db.exec(`ALTER TABLE producto_insumos ADD COLUMN rinde_unidades REAL NOT NULL DEFAULT 1`);
+}
 
 module.exports = db;

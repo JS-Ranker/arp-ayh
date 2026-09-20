@@ -15,6 +15,8 @@ app.use('/api/categorias', require('./routes/categorias'));
 app.use('/api/ventas', require('./routes/ventas'));
 app.use('/api/compras', require('./routes/compras'));
 app.use('/api/envios', require('./routes/envios'));
+app.use('/api/insumos', require('./routes/insumos'));
+app.use('/api/costos-fijos', require('./routes/costos-fijos'));
 app.use('/api/reportes', require('./routes/reportes'));
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

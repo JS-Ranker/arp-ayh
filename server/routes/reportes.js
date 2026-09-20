@@ -118,4 +118,73 @@ router.get('/valorizacion-inventario', (req, res) => {
   res.json(rows);
 });
 
+router.get('/punto-equilibrio', (req, res) => {
+  const fijos = db.prepare(`SELECT * FROM costos_fijos WHERE activo = 1 ORDER BY nombre`).all();
+  const costosFijosTotal = fijos.reduce((sum, f) => sum + (f.periodicidad === 'anual' ? f.monto / 12 : f.monto), 0);
+
+  const ventasRecientes = db.prepare(`
+    SELECT dv.cantidad, dv.costo_unitario, dv.subtotal
+    FROM detalle_venta dv
+    JOIN ventas v ON v.id = dv.venta_id
+    WHERE v.estado = 'completada' AND v.fecha >= datetime('now', '-30 days', 'localtime')
+  `).all();
+
+  let margenPct = null;
+  let ticketPromedio = null;
+  let fuenteMargen = null;
+
+  if (ventasRecientes.length > 0) {
+    const totalVenta = ventasRecientes.reduce((s, l) => s + l.subtotal, 0);
+    const totalCosto = ventasRecientes.reduce((s, l) => s + l.costo_unitario * l.cantidad, 0);
+    const totalUnidades = ventasRecientes.reduce((s, l) => s + l.cantidad, 0);
+    if (totalVenta > 0) {
+      margenPct = (totalVenta - totalCosto) / totalVenta;
+      ticketPromedio = totalUnidades > 0 ? totalVenta / totalUnidades : null;
+      fuenteMargen = 'ventas_30_dias';
+    }
+  }
+
+  if (margenPct == null) {
+    const productos = db.prepare(`
+      SELECT precio_costo, precio_venta FROM productos WHERE activo = 1 AND precio_venta > 0
+    `).all();
+    const pcts = productos
+      .map((p) => (p.precio_venta - p.precio_costo) / p.precio_venta)
+      .filter((x) => Number.isFinite(x));
+    if (pcts.length > 0) {
+      margenPct = pcts.reduce((s, x) => s + x, 0) / pcts.length;
+      fuenteMargen = 'promedio_productos';
+    }
+  }
+
+  const puntoEquilibrioVentas = margenPct && margenPct > 0 ? costosFijosTotal / margenPct : null;
+
+  const mesActual = new Date().toISOString().slice(0, 7);
+  const ventasMes = db.prepare(`
+    SELECT COALESCE(SUM(total), 0) AS total FROM ventas WHERE strftime('%Y-%m', fecha) = ? AND estado = 'completada'
+  `).get(mesActual);
+
+  const productos = db.prepare(`
+    SELECT id, nombre, sku, precio_costo, precio_venta FROM productos WHERE activo = 1 ORDER BY nombre
+  `).all().map((p) => {
+    const margenUnitario = p.precio_venta - p.precio_costo;
+    return {
+      ...p,
+      margen_unitario: margenUnitario,
+      unidades_necesarias: margenUnitario > 0 ? Math.ceil(costosFijosTotal / margenUnitario) : null,
+    };
+  });
+
+  res.json({
+    costos_fijos: fijos,
+    costos_fijos_total: costosFijosTotal,
+    margen_contribucion_pct: margenPct,
+    fuente_margen: fuenteMargen,
+    ticket_promedio: ticketPromedio,
+    punto_equilibrio_ventas: puntoEquilibrioVentas,
+    ventas_mes_actual: ventasMes.total,
+    productos,
+  });
+});
+
 module.exports = router;

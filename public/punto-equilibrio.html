@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Punto de equilibrio - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Punto de equilibrio</h1>
+          <p>Cuanto necesitas vender al mes para cubrir tus costos fijos</p>
+        </div>
+      </div>
+
+      <div class="grid grid-3" id="stat-tiles">
+        <div class="card stat-tile"><div class="label">Costos fijos al mes</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Margen de contribucion</div><div class="value">&mdash;</div></div>
+        <div class="card stat-tile"><div class="label">Punto de equilibrio (ventas/mes)</div><div class="value">&mdash;</div></div>
+      </div>
+
+      <div class="card" style="margin-top:16px" id="card-avance">
+        <h2 style="margin-top:0;font-size:15px">Tu avance este mes</h2>
+        <div id="avance-contenido"><p class="empty-state">Cargando...</p></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:16px;align-items:start">
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:10px">
+            <h2 style="margin:0;font-size:15px;flex:1">Costos fijos mensuales</h2>
+            <button class="btn btn-primary btn-sm" id="btn-nuevo">+ Agregar</button>
+          </div>
+          <p class="hint" style="margin-top:0">Arriendo, sueldos, internet, contador, etc. Todo lo que pagas exista o no una venta.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nombre</th><th class="num">Equivale a / mes</th><th></th></tr></thead>
+              <tbody id="tbl-costos"><tr><td colspan="3" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 style="margin-top:0;font-size:15px">Unidades necesarias por producto</h2>
+          <p class="hint" style="margin-top:0">Si ese fuera tu unico producto vendido, cuantas unidades cubririan tus costos fijos del mes.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Margen unit.</th><th class="num">Unidades necesarias</th></tr></thead>
+              <tbody id="tbl-productos"><tr><td colspan="3" class="empty-state">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2 id="modal-titulo">Nuevo costo fijo</h2>
+      <form id="form">
+        <input type="hidden" id="f-id">
+        <div class="field"><label>Nombre *</label><input id="f-nombre" placeholder="Ej: Arriendo local" required></div>
+        <div class="field-row">
+          <div class="field"><label>Monto</label><input id="f-monto" type="number" min="0" step="1" value="0"></div>
+          <div class="field">
+            <label>Periodicidad</label>
+            <select id="f-periodicidad">
+              <option value="mensual">Mensual</option>
+              <option value="anual">Anual</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Notas</label><input id="f-notas" placeholder="opcional"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    function formatoPct(x) {
+      return x == null ? '-' : `${(x * 100).toFixed(0)}%`;
+    }
+
+    function equivalenteMensual(c) {
+      return c.periodicidad === 'anual' ? c.monto / 12 : c.monto;
+    }
+
+    async function cargarTodo() {
+      const data = await api('/reportes/punto-equilibrio');
+
+      const tiles = document.querySelectorAll('#stat-tiles .stat-tile');
+      tiles[0].querySelector('.value').textContent = formatoMoneda(data.costos_fijos_total);
+      tiles[1].querySelector('.value').textContent = formatoPct(data.margen_contribucion_pct);
+      tiles[1].insertAdjacentHTML('beforeend', `<div class="sub">${
+        data.fuente_margen === 'ventas_30_dias' ? 'Segun tus ventas de los ultimos 30 dias'
+          : data.fuente_margen === 'promedio_productos' ? 'Promedio de tus productos (aun sin ventas)'
+          : 'Agrega precios a tus productos'
+      }</div>`);
+      tiles[2].querySelector('.value').textContent = data.punto_equilibrio_ventas == null ? '-' : formatoMoneda(data.punto_equilibrio_ventas);
+
+      renderAvance(data);
+      renderCostos(data.costos_fijos);
+      renderProductos(data.productos);
+    }
+
+    function renderAvance(data) {
+      const cont = document.getElementById('avance-contenido');
+      if (data.costos_fijos_total === 0) {
+        cont.innerHTML = '<p class="empty-state">Agrega tus costos fijos abajo para calcular tu punto de equilibrio real.</p>';
+        return;
+      }
+      if (data.punto_equilibrio_ventas == null) {
+        cont.innerHTML = '<p class="empty-state">Agrega precio de costo y venta a tus productos para calcular tu margen.</p>';
+        return;
+      }
+      const pct = data.punto_equilibrio_ventas > 0 ? (data.ventas_mes_actual / data.punto_equilibrio_ventas) * 100 : 100;
+      const pctBarra = Math.min(100, Math.max(0, pct));
+      const completo = pct >= 100;
+      cont.innerHTML = `
+        <div class="be-progress">
+          <div class="be-progress-fill ${completo ? 'is-complete' : ''}" style="width:${pctBarra}%"></div>
+          <div class="be-progress-label">${pct.toFixed(0)}%</div>
+        </div>
+        <p style="margin:12px 0 0;font-size:13.5px">
+          Llevas <strong>${formatoMoneda(data.ventas_mes_actual)}</strong> vendidos este mes de un punto de equilibrio de
+          <strong>${formatoMoneda(data.punto_equilibrio_ventas)}</strong>.
+          ${completo ? ' &#127881; Ya cubriste tus costos fijos del mes.' : ` Te faltan ${formatoMoneda(Math.max(0, data.punto_equilibrio_ventas - data.ventas_mes_actual))} para cubrirlos.`}
+        </p>
+      `;
+    }
+
+    function renderCostos(costos) {
+      const tbody = document.getElementById('tbl-costos');
+      if (costos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Aun no has agregado costos fijos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = costos.map((c) => `
+        <tr>
+          <td>${escapeHtml(c.nombre)} ${c.periodicidad === 'anual' ? '<span class="badge badge-muted">anual</span>' : ''}</td>
+          <td class="num">${formatoMoneda(equivalenteMensual(c))}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-editar="${c.id}">Editar</button>
+            <button class="btn btn-sm btn-danger" data-eliminar="${c.id}">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderProductos(productos) {
+      const tbody = document.getElementById('tbl-productos');
+      const ordenados = [...productos].sort((a, b) => {
+        if (a.unidades_necesarias == null) return 1;
+        if (b.unidades_necesarias == null) return -1;
+        return a.unidades_necesarias - b.unidades_necesarias;
+      });
+      if (ordenados.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="empty-state">Aun no hay productos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = ordenados.map((p) => `
+        <tr>
+          <td>${escapeHtml(p.nombre)}</td>
+          <td class="num">${formatoMoneda(p.margen_unitario)}</td>
+          <td class="num">${p.unidades_necesarias == null ? '<span class="text-muted">sin margen</span>' : formatoNumero(p.unidades_necesarias)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function abrirModal(c) {
+      document.getElementById('modal-titulo').textContent = c ? 'Editar costo fijo' : 'Nuevo costo fijo';
+      document.getElementById('f-id').value = c?.id || '';
+      document.getElementById('f-nombre').value = c?.nombre || '';
+      document.getElementById('f-monto').value = c?.monto ?? 0;
+      document.getElementById('f-periodicidad').value = c?.periodicidad || 'mensual';
+      document.getElementById('f-notas').value = c?.notas || '';
+      document.getElementById('modal').hidden = false;
+    }
+
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModal(null));
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const payload = {
+        nombre: document.getElementById('f-nombre').value.trim(),
+        monto: document.getElementById('f-monto').value,
+        periodicidad: document.getElementById('f-periodicidad').value,
+        notas: document.getElementById('f-notas').value.trim(),
+      };
+      try {
+        if (id) {
+          await api(`/costos-fijos/${id}`, { method: 'PUT', body: payload });
+        } else {
+          await api('/costos-fijos', { method: 'POST', body: payload });
+        }
+        toast('Costo fijo guardado', 'success');
+        document.getElementById('modal').hidden = true;
+        cargarTodo();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('tbl-costos').addEventListener('click', async (e) => {
+      const editarId = e.target.dataset.editar;
+      const eliminarId = e.target.dataset.eliminar;
+      if (editarId) {
+        const data = await api('/reportes/punto-equilibrio');
+        const c = data.costos_fijos.find((x) => String(x.id) === editarId);
+        abrirModal(c);
+      } else if (eliminarId) {
+        if (!confirm('¿Eliminar este costo fijo?')) return;
+        try {
+          await api(`/costos-fijos/${eliminarId}`, { method: 'DELETE' });
+          toast('Costo fijo eliminado', 'success');
+          cargarTodo();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    cargarTodo();
+  })();
+  </script>
+</body>
+</html>

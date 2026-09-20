@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Insumos - ERP AYH</title>
+  <link rel="icon" href="/img/logo_ayh.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div id="app-nav"></div>
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Insumos y costos</h1>
+          <p>Papel, tinta, tazas en blanco, electricidad, etc. Se usan en la calculadora de precios de Productos</p>
+        </div>
+        <button class="btn btn-primary" id="btn-nuevo">+ Nuevo insumo</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="buscar" placeholder="Buscar insumo..." style="width:260px">
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nombre</th><th>Unidad</th><th class="num">Costo unitario</th><th>Notas</th><th></th></tr></thead>
+            <tbody id="tbl"><tr><td colspan="5" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2 id="modal-titulo">Nuevo insumo</h2>
+      <form id="form">
+        <input type="hidden" id="f-id">
+        <div class="field"><label>Nombre *</label><input id="f-nombre" placeholder="Ej: Tinta sublimacion negra" required></div>
+        <div class="field-row">
+          <div class="field">
+            <label>Unidad de medida</label>
+            <select id="f-unidad">
+              <option value="unidad">Unidad (pieza, taza, polera...)</option>
+              <option value="hoja">Hoja</option>
+              <option value="ml">Mililitro (ml)</option>
+              <option value="mm">Milímetro (mm)</option>
+              <option value="cm">Centímetro (cm)</option>
+              <option value="litro">Litro (L)</option>
+              <option value="gr">Gramo (gr)</option>
+              <option value="kg">Kilogramo (kg)</option>
+              <option value="metro">Metro</option>
+              <option value="m2">Metro cuadrado (m²)</option>
+              <option value="kWh">kWh (electricidad)</option>
+              <option value="hora">Hora</option>
+              <option value="__otra__">Otra unidad...</option>
+            </select>
+            <input id="f-unidad-otra" placeholder="Escribe la unidad" style="margin-top:6px" hidden>
+          </div>
+          <div class="field">
+            <label>Costo por unidad</label>
+            <input id="f-costo" type="number" min="0" step="any" value="0">
+          </div>
+        </div>
+
+        <div class="card" style="margin:4px 0 14px;padding:10px 12px;background:var(--paper-2)">
+          <strong style="font-size:12.5px">¿Lo compras por paquete, resma, litro o caja?</strong>
+          <p class="hint" style="margin-top:2px">Pon el precio que pagaste y elige cuanto trae el paquete (segun la unidad de arriba). Calculamos el costo por unidad solo.</p>
+          <div class="field-row" style="align-items:end;margin-bottom:0;flex-wrap:wrap">
+            <div class="field" style="margin-bottom:0;min-width:140px"><label>Precio pagado</label><input id="f-paquete-precio" type="number" min="0" step="any" placeholder="Ej: 14200"></div>
+            <div class="field" style="margin-bottom:0;min-width:170px">
+              <label>Cantidad que trae</label>
+              <select id="f-paquete-cantidad"></select>
+              <input id="f-paquete-cantidad-otra" type="number" min="0.01" step="any" placeholder="Ingresa la cantidad" style="margin-top:6px" hidden>
+            </div>
+            <div class="field" style="margin-bottom:0"><button type="button" class="btn btn-sm btn-primary" id="btn-paquete-calcular">Calcular costo unitario</button></div>
+          </div>
+
+          <div class="field-row" id="conversion-helper" style="align-items:end;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--ink);flex-wrap:wrap" hidden>
+            <div class="field" style="margin-bottom:0;flex:1 1 100%">
+              <p class="hint" style="margin:0">¿Lo compraste en otra unidad? Te convertimos la cantidad automaticamente.</p>
+            </div>
+            <div class="field" style="margin-bottom:0;min-width:130px">
+              <label>Compraste en</label>
+              <select id="f-conv-unidad"></select>
+            </div>
+            <div class="field" style="margin-bottom:0;min-width:110px">
+              <label>Cantidad comprada</label>
+              <input id="f-conv-cantidad" type="number" min="0" step="any" placeholder="Ej: 33">
+            </div>
+            <div class="field" style="margin-bottom:0"><button type="button" class="btn btn-sm" id="btn-conv-convertir">Convertir</button></div>
+          </div>
+        </div>
+
+        <p class="hint">Ej: si la tinta cuesta $15.000 el litro (1000 ml), registra unidad "ml" y costo unitario $15.</p>
+        <div class="field"><label>Notas</label><input id="f-notas" placeholder="opcional"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+    </main>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/router.js"></script>
+  <script>
+  (function () {
+    async function cargarTabla() {
+      const q = document.getElementById('buscar').value.trim();
+      const rows = await api(`/insumos${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      const tbody = document.getElementById('tbl');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Aun no hay insumos. Agrega papel, tinta, tazas, electricidad, etc.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((i) => `
+        <tr>
+          <td>${escapeHtml(i.nombre)}</td>
+          <td>${escapeHtml(i.unidad)}</td>
+          <td class="num">${formatoMoneda(i.costo_unitario)}</td>
+          <td class="text-muted">${escapeHtml(i.notas || '')}</td>
+          <td class="tag-nowrap">
+            <button class="btn btn-sm" data-editar="${i.id}">Editar</button>
+            <button class="btn btn-sm btn-danger" data-eliminar="${i.id}">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    const PRESETS_CANTIDAD = {
+      hoja: [50, 100, 250, 500],
+      ml: [50, 100, 250, 500, 1000, 5000],
+      mm: [100, 500, 1000, 5000, 10000],
+      cm: [100, 500, 1000, 3000, 3300, 5000],
+      litro: [1, 2, 4, 5, 10, 20],
+      gr: [50, 100, 250, 500, 1000],
+      kg: [1, 5, 10, 25],
+      unidad: [6, 10, 12, 24, 25, 50, 100],
+      metro: [1, 5, 10, 25, 50],
+      m2: [1, 5, 10, 25],
+    };
+
+    function nombreUnidadCorta(valor) {
+      const opt = document.querySelector(`#f-unidad option[value="${valor}"]`);
+      if (!opt) return valor;
+      return opt.textContent.replace(/\s*\(.*\)$/, '').toLowerCase();
+    }
+
+    // Factor = cuantas unidades "base" del grupo equivalen a 1 de esta unidad.
+    const GRUPOS_CONVERSION = {
+      mm: { grupo: 'longitud', factor: 1 },
+      cm: { grupo: 'longitud', factor: 10 },
+      metro: { grupo: 'longitud', factor: 1000 },
+      ml: { grupo: 'volumen', factor: 1 },
+      litro: { grupo: 'volumen', factor: 1000 },
+      gr: { grupo: 'peso', factor: 1 },
+      kg: { grupo: 'peso', factor: 1000 },
+    };
+
+    function renderConversionHelper() {
+      const unidad = document.getElementById('f-unidad').value;
+      const info = GRUPOS_CONVERSION[unidad];
+      const helper = document.getElementById('conversion-helper');
+      const opciones = info
+        ? Object.entries(GRUPOS_CONVERSION).filter(([clave, datos]) => datos.grupo === info.grupo && clave !== unidad)
+        : [];
+      if (!info || opciones.length === 0) {
+        helper.hidden = true;
+        return;
+      }
+      document.getElementById('f-conv-unidad').innerHTML = opciones
+        .map(([clave]) => `<option value="${clave}">${escapeHtml(nombreUnidadCorta(clave))}</option>`)
+        .join('');
+      document.getElementById('f-conv-cantidad').value = '';
+      helper.hidden = false;
+    }
+
+    function renderPresetsCantidad() {
+      const unidad = document.getElementById('f-unidad').value;
+      const presets = PRESETS_CANTIDAD[unidad] || [];
+      const nombre = nombreUnidadCorta(unidad);
+      const sel = document.getElementById('f-paquete-cantidad');
+      sel.innerHTML = '<option value="">Selecciona...</option>'
+        + presets.map((n) => `<option value="${n}">${n} ${escapeHtml(nombre)}</option>`).join('')
+        + '<option value="__otra__">Otra cantidad...</option>';
+      sel.value = '';
+      document.getElementById('f-paquete-cantidad-otra').hidden = true;
+      document.getElementById('f-paquete-cantidad-otra').value = '';
+    }
+
+    function abrirModal(i) {
+      document.getElementById('modal-titulo').textContent = i ? 'Editar insumo' : 'Nuevo insumo';
+      document.getElementById('f-id').value = i?.id || '';
+      document.getElementById('f-nombre').value = i?.nombre || '';
+      const unidadGuardada = i?.unidad || 'unidad';
+      const unidadSelect = document.getElementById('f-unidad');
+      const existeOpcion = Array.from(unidadSelect.options).some((o) => o.value === unidadGuardada);
+      unidadSelect.value = existeOpcion ? unidadGuardada : '__otra__';
+      document.getElementById('f-unidad-otra').hidden = existeOpcion;
+      document.getElementById('f-unidad-otra').value = existeOpcion ? '' : unidadGuardada;
+      document.getElementById('f-costo').value = i?.costo_unitario ?? 0;
+      document.getElementById('f-notas').value = i?.notas || '';
+      document.getElementById('f-paquete-precio').value = '';
+      renderPresetsCantidad();
+      renderConversionHelper();
+      document.getElementById('modal').hidden = false;
+    }
+
+    document.getElementById('f-unidad').addEventListener('change', () => {
+      const esOtra = document.getElementById('f-unidad').value === '__otra__';
+      document.getElementById('f-unidad-otra').hidden = !esOtra;
+      renderPresetsCantidad();
+      renderConversionHelper();
+    });
+
+    document.getElementById('btn-conv-convertir').addEventListener('click', () => {
+      const unidadUso = document.getElementById('f-unidad').value;
+      const unidadCompra = document.getElementById('f-conv-unidad').value;
+      const cantidadComprada = Number(document.getElementById('f-conv-cantidad').value);
+      const infoUso = GRUPOS_CONVERSION[unidadUso];
+      const infoCompra = GRUPOS_CONVERSION[unidadCompra];
+      if (!cantidadComprada || !infoUso || !infoCompra) {
+        toast('Ingresa cuanto compraste', 'error');
+        return;
+      }
+      const cantidadEnUso = Math.round((cantidadComprada * infoCompra.factor / infoUso.factor) * 1000) / 1000;
+      const sel = document.getElementById('f-paquete-cantidad');
+      const otra = document.getElementById('f-paquete-cantidad-otra');
+      const opcionExacta = Array.from(sel.options).find((o) => Number(o.value) === cantidadEnUso);
+      if (opcionExacta) {
+        sel.value = opcionExacta.value;
+        otra.hidden = true;
+        otra.value = '';
+      } else {
+        sel.value = '__otra__';
+        otra.hidden = false;
+        otra.value = cantidadEnUso;
+      }
+      toast(`${cantidadComprada} ${nombreUnidadCorta(unidadCompra)} = ${cantidadEnUso} ${nombreUnidadCorta(unidadUso)}`, 'success');
+    });
+
+    document.getElementById('f-paquete-cantidad').addEventListener('change', () => {
+      const esOtra = document.getElementById('f-paquete-cantidad').value === '__otra__';
+      document.getElementById('f-paquete-cantidad-otra').hidden = !esOtra;
+      if (esOtra) document.getElementById('f-paquete-cantidad-otra').focus();
+    });
+
+    document.getElementById('btn-paquete-calcular').addEventListener('click', () => {
+      const precio = Number(document.getElementById('f-paquete-precio').value);
+      const selCantidad = document.getElementById('f-paquete-cantidad').value;
+      const cantidad = selCantidad === '__otra__'
+        ? Number(document.getElementById('f-paquete-cantidad-otra').value)
+        : Number(selCantidad);
+      if (!precio || !cantidad) {
+        toast('Completa el precio pagado y la cantidad que trae', 'error');
+        return;
+      }
+      const costoUnitario = Math.round((precio / cantidad) * 100) / 100;
+      document.getElementById('f-costo').value = costoUnitario;
+      toast(`Costo unitario calculado: ${formatoMoneda(costoUnitario)}`, 'success');
+    });
+
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModal(null));
+    document.querySelectorAll('[data-close]').forEach((btn) => {
+      btn.addEventListener('click', (e) => e.target.closest('.modal-backdrop').hidden = true);
+    });
+
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('f-id').value;
+      const unidadSel = document.getElementById('f-unidad').value;
+      const unidad = unidadSel === '__otra__'
+        ? document.getElementById('f-unidad-otra').value.trim()
+        : unidadSel;
+      if (unidadSel === '__otra__' && !unidad) {
+        toast('Escribe el nombre de la unidad personalizada', 'error');
+        return;
+      }
+      const payload = {
+        nombre: document.getElementById('f-nombre').value.trim(),
+        unidad: unidad || 'unidad',
+        costo_unitario: document.getElementById('f-costo').value,
+        notas: document.getElementById('f-notas').value.trim(),
+      };
+      try {
+        if (id) {
+          await api(`/insumos/${id}`, { method: 'PUT', body: payload });
+        } else {
+          await api('/insumos', { method: 'POST', body: payload });
+        }
+        toast('Insumo guardado', 'success');
+        document.getElementById('modal').hidden = true;
+        cargarTabla();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('tbl').addEventListener('click', async (e) => {
+      const editarId = e.target.dataset.editar;
+      const eliminarId = e.target.dataset.eliminar;
+      if (editarId) {
+        const i = await api(`/insumos/${editarId}`);
+        abrirModal(i);
+      } else if (eliminarId) {
+        if (!confirm('¿Eliminar este insumo? Las recetas de productos que lo usen quedaran sin ese item.')) return;
+        try {
+          await api(`/insumos/${eliminarId}`, { method: 'DELETE' });
+          toast('Insumo eliminado', 'success');
+          cargarTabla();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
+
+    document.getElementById('buscar').addEventListener('input', debounce(cargarTabla, 300));
+    cargarTabla();
+  })();
+  </script>
+</body>
+</html>

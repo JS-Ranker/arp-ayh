@@ -44,6 +44,49 @@ router.get('/:id/movimientos', (req, res) => {
   res.json(rows);
 });
 
+function getReceta(productoId) {
+  const items = db.prepare(`
+    SELECT pi.id, pi.insumo_id, pi.cantidad, pi.rinde_unidades, i.nombre AS insumo_nombre, i.unidad, i.costo_unitario,
+           (pi.cantidad * i.costo_unitario / pi.rinde_unidades) AS subtotal
+    FROM producto_insumos pi
+    JOIN insumos i ON i.id = pi.insumo_id
+    WHERE pi.producto_id = ?
+    ORDER BY i.nombre
+  `).all(productoId);
+  const costoTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+  return { items, costo_total: costoTotal };
+}
+
+router.get('/:id/receta', (req, res) => {
+  const producto = db.prepare(`SELECT id FROM productos WHERE id = ?`).get(req.params.id);
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
+  res.json(getReceta(req.params.id));
+});
+
+router.put('/:id/receta', (req, res) => {
+  const producto = db.prepare(`SELECT id FROM productos WHERE id = ?`).get(req.params.id);
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
+
+  const { items } = req.body;
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'Formato invalido' });
+
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM producto_insumos WHERE producto_id = ?`).run(req.params.id);
+    const insert = db.prepare(`
+      INSERT INTO producto_insumos (producto_id, insumo_id, cantidad, rinde_unidades) VALUES (?, ?, ?, ?)
+    `);
+    for (const item of items) {
+      const cantidad = Number(item.cantidad);
+      const rinde = Number(item.rinde_unidades) || 1;
+      if (!item.insumo_id || !cantidad || cantidad <= 0 || rinde <= 0) continue;
+      insert.run(req.params.id, item.insumo_id, cantidad, rinde);
+    }
+  });
+  tx();
+
+  res.json(getReceta(req.params.id));
+});
+
 function validarProducto(body) {
   if (!body.nombre || !body.nombre.trim()) return 'El nombre es obligatorio';
   if (body.precio_venta != null && Number(body.precio_venta) < 0) return 'El precio de venta no puede ser negativo';
